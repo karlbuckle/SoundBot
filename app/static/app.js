@@ -1,4 +1,4 @@
-const state = { guilds: [], sounds: [] };
+const state = { guilds: [], sounds: [], seeking: false, applyingPlaybackControl: false };
 const elements = {
   guild: document.querySelector("#guild-select"),
   channel: document.querySelector("#channel-select"),
@@ -7,7 +7,13 @@ const elements = {
   toast: document.querySelector("#toast"),
   nowPlaying: document.querySelector("#now-playing"),
   nowTitle: document.querySelector("#now-playing-title"),
+  seekSlider: document.querySelector("#seek-slider"),
+  seekTime: document.querySelector("#seek-time"),
+  volumeSlider: document.querySelector("#volume-slider"),
+  volumeLabel: document.querySelector("#volume-label"),
+  normalizeToggle: document.querySelector("#normalize-toggle"),
 };
+let playbackPoller = null;
 
 function apiKey() { return sessionStorage.getItem("soundboardApiKey") || ""; }
 
@@ -61,12 +67,36 @@ function updateChannels() {
   const guild = state.guilds.find((item) => item.id === elements.guild.value);
   setOptions(elements.channel, guild?.channels || [], "Choose channel");
   if (guild?.channels.length === 1) elements.channel.value = guild.channels[0].id;
-  if (guild?.status) showNowPlaying(guild.status.title);
+  if (guild?.status) renderNowPlaying(guild.status);
   else elements.nowPlaying.hidden = true;
 }
 
-function showNowPlaying(title) {
-  elements.nowTitle.textContent = title;
+function formatClock(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  const mins = Math.floor(total / 60);
+  const secs = `${total % 60}`.padStart(2, "0");
+  return `${mins}:${secs}`;
+}
+
+function playbackOptions() {
+  return {
+    volume: Number(elements.volumeSlider.value),
+    normalize: elements.normalizeToggle.checked,
+  };
+}
+
+function renderNowPlaying(status) {
+  elements.nowTitle.textContent = status.title;
+  const volume = Number.isFinite(status.volume) ? Math.max(0, status.volume) : 1;
+  elements.volumeSlider.value = volume.toFixed(2);
+  elements.volumeLabel.textContent = `Volume ${Math.round(volume * 100)}%`;
+  elements.normalizeToggle.checked = Boolean(status.normalize);
+  const duration = Number.isFinite(status.duration_seconds) ? status.duration_seconds : 0;
+  const position = Number.isFinite(status.position_seconds) ? status.position_seconds : 0;
+  elements.seekSlider.disabled = !status.can_seek;
+  elements.seekSlider.max = String(Math.max(duration, 0));
+  if (!state.seeking) elements.seekSlider.value = String(Math.min(position, duration || position));
+  elements.seekTime.textContent = `${formatClock(position)} / ${formatClock(duration)}`;
   elements.nowPlaying.hidden = false;
 }
 
@@ -103,9 +133,11 @@ function renderSounds() {
 async function playSound(sound) {
   try {
     const result = await api("/api/play/sound", {
-      method: "POST", body: JSON.stringify({ ...destination(), ...clientIdentity(), sound_id: sound.id }),
+      method: "POST",
+      body: JSON.stringify({ ...destination(), ...clientIdentity(), ...playbackOptions(), sound_id: sound.id }),
     });
-    showNowPlaying(result.title);
+    renderNowPlaying(result);
+    startPlaybackPolling();
     notify(`Playing ${result.title}`);
   } catch (error) { notify(error.message, true); }
 }
@@ -202,6 +234,7 @@ async function load() {
     setOptions(elements.guild, guilds, "Choose server");
     if (guilds.length === 1) elements.guild.value = guilds[0].id;
     updateChannels();
+    startPlaybackPolling();
     renderSounds();
     document.querySelector("#status-dot").classList.toggle("online", health.discord_ready);
     document.querySelector("#connection-title").textContent = health.discord_ready ? "Discord online" : "Discord offline";
@@ -209,6 +242,22 @@ async function load() {
   } catch (error) {
     notify(error.message, true);
     if (error.message.toLowerCase().includes("api key")) setApiKey();
+  }
+
+  async function refreshPlaybackStatus() {
+    const guildId = elements.guild.value;
+    if (!guildId) return;
+    try {
+      const status = await api(`/api/play/status/${guildId}`);
+      if (status) renderNowPlaying(status);
+      else elements.nowPlaying.hidden = true;
+    } catch (_error) { /* polling is best effort */ }
+  }
+
+  function startPlaybackPolling() {
+    clearInterval(playbackPoller);
+    playbackPoller = setInterval(refreshPlaybackStatus, 1000);
+    refreshPlaybackStatus();
   }
 }
 
@@ -245,9 +294,10 @@ document.querySelector("#play-youtube").addEventListener("click", async () => {
   try {
     const url = document.querySelector("#youtube-url").value;
     const result = await api("/api/play/youtube", {
-      method: "POST", body: JSON.stringify({ ...destination(), ...clientIdentity(), url }),
+      method: "POST", body: JSON.stringify({ ...destination(), ...clientIdentity(), ...playbackOptions(), url }),
     });
-    showNowPlaying(result.title);
+    renderNowPlaying(result);
+    startPlaybackPolling();
     notify(`Playing ${result.title}`);
   } catch (error) { notify(error.message, true); }
 });
@@ -259,6 +309,7 @@ document.querySelector("#stop-button").addEventListener("click", async () => {
     const { guild_id } = destination();
     await api("/api/play/stop", { method: "POST", body: JSON.stringify({ guild_id }) });
     elements.nowPlaying.hidden = true;
+    clearInterval(playbackPoller);
     notify("Playback stopped");
   } catch (error) { notify(error.message, true); }
 });
@@ -267,8 +318,57 @@ document.querySelector("#leave-button").addEventListener("click", async () => {
     const { guild_id } = destination();
     await api("/api/play/leave", { method: "POST", body: JSON.stringify({ guild_id }) });
     elements.nowPlaying.hidden = true;
+    clearInterval(playbackPoller);
     notify("Disconnected from voice");
   } catch (error) { notify(error.message, true); }
+});
+elements.volumeSlider.addEventListener("input", () => {
+  const volume = Number(elements.volumeSlider.value);
+  elements.volumeLabel.textContent = `Volume ${Math.round(volume * 100)}%`;
+});
+elements.volumeSlider.addEventListener("change", async () => {
+  if (state.applyingPlaybackControl) return;
+  state.applyingPlaybackControl = true;
+  try {
+    const result = await api("/api/play/volume", {
+      method: "POST",
+      body: JSON.stringify({ guild_id: destination().guild_id, volume: Number(elements.volumeSlider.value) }),
+    });
+    renderNowPlaying(result);
+  } catch (error) { notify(error.message, true); }
+  state.applyingPlaybackControl = false;
+});
+elements.normalizeToggle.addEventListener("change", async () => {
+  if (state.applyingPlaybackControl) return;
+  state.applyingPlaybackControl = true;
+  try {
+    const result = await api("/api/play/normalize", {
+      method: "POST",
+      body: JSON.stringify({ guild_id: destination().guild_id, normalize: elements.normalizeToggle.checked }),
+    });
+    renderNowPlaying(result);
+  } catch (error) { notify(error.message, true); }
+  state.applyingPlaybackControl = false;
+});
+elements.seekSlider.addEventListener("input", () => {
+  state.seeking = true;
+  const duration = Number(elements.seekSlider.max);
+  const position = Number(elements.seekSlider.value);
+  elements.seekTime.textContent = `${formatClock(position)} / ${formatClock(duration)}`;
+});
+elements.seekSlider.addEventListener("change", async () => {
+  if (elements.seekSlider.disabled) {
+    state.seeking = false;
+    return;
+  }
+  try {
+    const result = await api("/api/play/seek", {
+      method: "POST",
+      body: JSON.stringify({ guild_id: destination().guild_id, position_seconds: Number(elements.seekSlider.value) }),
+    });
+    renderNowPlaying(result);
+  } catch (error) { notify(error.message, true); }
+  state.seeking = false;
 });
 
 const route = location.hash.slice(1);

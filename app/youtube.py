@@ -21,6 +21,7 @@ class YouTubeTrack:
     title: str
     stream_url: str
     webpage_url: str
+    duration_seconds: float | None
 
 
 def validate_youtube_url(url: str) -> str:
@@ -45,6 +46,7 @@ def _extract(url: str) -> YouTubeTrack:
         title=info.get("title") or "YouTube video",
         stream_url=info["url"],
         webpage_url=info.get("webpage_url") or url,
+        duration_seconds=float(info["duration"]) if info.get("duration") else None,
     )
 
 

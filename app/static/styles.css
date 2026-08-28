@@ -69,9 +69,16 @@ select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #
 .input-action input { min-width: 0; flex: 1; }
 .now-playing { position: fixed; bottom: 24px; left: calc(250px + 4vw); right: 4vw; padding: 13px 16px; display: flex; align-items: center; gap: 14px; background: #292431ee; border: 1px solid #493f57; border-radius: 13px; box-shadow: 0 16px 50px #0007; backdrop-filter: blur(14px); z-index: 10; }
 .now-playing[hidden] { display: none; }
-.now-playing div:nth-child(2) { min-width: 0; flex: 1; }
+.now-meta { min-width: 0; max-width: 300px; }
 .now-playing small, .now-playing strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-playing small { color: var(--muted); }
+.player-controls { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.seek-control, .volume-control, .normalize-control { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 11px; letter-spacing: .02em; }
+.seek-control { flex: 1; min-width: 140px; }
+.volume-control { width: 130px; }
+.normalize-control { flex-direction: row; align-items: center; white-space: nowrap; margin-top: 16px; }
+.player-controls input[type="range"] { width: 100%; accent-color: var(--accent); }
+.normalize-control input { width: 14px; height: 14px; margin: 0; }
 .equalizer { display: flex; align-items: center; gap: 3px; height: 28px; }
 .equalizer i { width: 3px; height: 15px; background: var(--accent); border-radius: 2px; animation: bounce .8s ease-in-out infinite alternate; }
 .equalizer i:nth-child(2) { animation-delay: -.25s; }.equalizer i:nth-child(3) { animation-delay: -.5s; }
@@ -135,7 +142,11 @@ code { color: #d8c2ff; background: #a97cf812; padding: 2px 5px; border-radius: 5
   .page-heading { align-items: flex-start; flex-direction: column; }
   .youtube-card, .input-action { flex-direction: column; }
   .input-action input, .input-action button { width: 100%; }
-  .now-playing { left: 15px; right: 15px; bottom: 78px; }
+  .now-playing { left: 15px; right: 15px; bottom: 78px; align-items: stretch; flex-wrap: wrap; }
+  .now-meta { max-width: none; width: 100%; }
+  .player-controls { width: 100%; flex-direction: column; align-items: stretch; }
+  .volume-control { width: 100%; }
+  .normalize-control { margin-top: 0; }
   .now-playing #leave-button { display: none; }
   .identity-card { align-items: stretch; flex-direction: column; }
   .identity-card input { width: 100%; }

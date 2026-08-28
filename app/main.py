@@ -55,6 +55,8 @@ class PlayRequest(BaseModel):
     channel_id: int
     client_id: str = Field(default="web-ui", max_length=100)
     requested_by: str = Field(default="Web UI", max_length=80)
+    volume: float = Field(default=1.0, ge=0.0, le=3.0)
+    normalize: bool = False
 
 
 class SoundPlayRequest(PlayRequest):
@@ -67,6 +69,21 @@ class YouTubePlayRequest(PlayRequest):
 
 class GuildRequest(BaseModel):
     guild_id: int
+
+
+class VolumeRequest(BaseModel):
+    guild_id: int
+    volume: float = Field(ge=0.0, le=3.0)
+
+
+class NormalizeRequest(BaseModel):
+    guild_id: int
+    normalize: bool
+
+
+class SeekRequest(BaseModel):
+    guild_id: int
+    position_seconds: float = Field(ge=0.0)
 
 
 def destination_names(guild_id: int, channel_id: int) -> tuple[str, str]:
@@ -180,7 +197,12 @@ async def play_sound(request: SoundPlayRequest) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="Sound not found.")
     try:
         state = await bot.playback.play_file(
-            request.guild_id, request.channel_id, sound.path, sound.name
+            request.guild_id,
+            request.channel_id,
+            sound.path,
+            sound.name,
+            volume=request.volume,
+            normalize=request.normalize,
         )
         guild_name, channel_name = destination_names(request.guild_id, request.channel_id)
         stats.record(
@@ -195,7 +217,11 @@ async def play_sound(request: SoundPlayRequest) -> dict[str, str]:
             channel_id=request.channel_id,
             channel_name=channel_name,
         )
-        return {"kind": state.kind, "title": state.title, "source": state.source}
+        return bot.playback.status(request.guild_id) or {
+            "kind": state.kind,
+            "title": state.title,
+            "source": state.source,
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -204,7 +230,11 @@ async def play_sound(request: SoundPlayRequest) -> dict[str, str]:
 async def play_youtube(request: YouTubePlayRequest) -> dict[str, str]:
     try:
         state = await bot.playback.play_youtube(
-            request.guild_id, request.channel_id, request.url
+            request.guild_id,
+            request.channel_id,
+            request.url,
+            volume=request.volume,
+            normalize=request.normalize,
         )
         guild_name, channel_name = destination_names(request.guild_id, request.channel_id)
         stats.record(
@@ -219,7 +249,11 @@ async def play_youtube(request: YouTubePlayRequest) -> dict[str, str]:
             channel_id=request.channel_id,
             channel_name=channel_name,
         )
-        return {"kind": state.kind, "title": state.title, "source": state.source}
+        return bot.playback.status(request.guild_id) or {
+            "kind": state.kind,
+            "title": state.title,
+            "source": state.source,
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -232,3 +266,47 @@ async def stop(request: GuildRequest) -> dict[str, bool]:
 @app.post("/api/play/leave", dependencies=[Depends(require_api_token)])
 async def leave(request: GuildRequest) -> dict[str, bool]:
     return {"disconnected": await bot.playback.leave(request.guild_id)}
+
+
+@app.get("/api/play/status/{guild_id}", dependencies=[Depends(require_api_token)])
+async def playback_status(guild_id: int) -> dict[str, object] | None:
+    return bot.playback.status(guild_id)
+
+
+@app.post("/api/play/volume", dependencies=[Depends(require_api_token)])
+async def update_volume(request: VolumeRequest) -> dict[str, object]:
+    try:
+        state = await bot.playback.set_volume(request.guild_id, request.volume)
+        return bot.playback.status(request.guild_id) or {
+            "kind": state.kind,
+            "title": state.title,
+            "source": state.source,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/play/normalize", dependencies=[Depends(require_api_token)])
+async def update_normalize(request: NormalizeRequest) -> dict[str, object]:
+    try:
+        state = await bot.playback.set_normalize(request.guild_id, request.normalize)
+        return bot.playback.status(request.guild_id) or {
+            "kind": state.kind,
+            "title": state.title,
+            "source": state.source,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/play/seek", dependencies=[Depends(require_api_token)])
+async def update_seek(request: SeekRequest) -> dict[str, object]:
+    try:
+        state = await bot.playback.seek(request.guild_id, request.position_seconds)
+        return bot.playback.status(request.guild_id) or {
+            "kind": state.kind,
+            "title": state.title,
+            "source": state.source,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
