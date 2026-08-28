@@ -191,7 +191,7 @@ async def guilds() -> list[dict[str, object]]:
 
 
 @app.post("/api/play/sound", dependencies=[Depends(require_api_token)])
-async def play_sound(request: SoundPlayRequest) -> dict[str, str]:
+async def play_sound(request: SoundPlayRequest) -> dict[str, object]:
     sound = library.get(request.sound_id)
     if sound is None:
         raise HTTPException(status_code=404, detail="Sound not found.")
@@ -227,7 +227,7 @@ async def play_sound(request: SoundPlayRequest) -> dict[str, str]:
 
 
 @app.post("/api/play/youtube", dependencies=[Depends(require_api_token)])
-async def play_youtube(request: YouTubePlayRequest) -> dict[str, str]:
+async def play_youtube(request: YouTubePlayRequest) -> dict[str, object]:
     try:
         state = await bot.playback.play_youtube(
             request.guild_id,

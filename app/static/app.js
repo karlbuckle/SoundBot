@@ -327,6 +327,7 @@ elements.volumeSlider.addEventListener("input", () => {
   elements.volumeLabel.textContent = `Volume ${Math.round(volume * 100)}%`;
 });
 elements.volumeSlider.addEventListener("change", async () => {
+  if (elements.nowPlaying.hidden) return;
   if (state.applyingPlaybackControl) return;
   state.applyingPlaybackControl = true;
   try {

@@ -41,7 +41,13 @@
             <label for="channel-select">Voice channel</label>
             <select id="channel-select" aria-label="Discord voice channel"></select>
           </div>
-          <button class="icon-button" id="settings-button" title="Set web API key" aria-label="Set web API key">⚙</button>
+          <div class="topbar-actions">
+            <label class="volume-control topbar-volume" for="volume-slider">
+              <span id="volume-label">Volume 100%</span>
+              <input id="volume-slider" type="range" min="0" max="3" step="0.05" value="1">
+            </label>
+            <button class="icon-button" id="settings-button" title="Set web API key" aria-label="Set web API key">⚙</button>
+          </div>
         </header>
 
         <section class="page active" id="sounds-page">
@@ -126,10 +132,6 @@
             <label class="seek-control" for="seek-slider">
               <span id="seek-time">0:00 / 0:00</span>
               <input id="seek-slider" type="range" min="0" max="0" step="0.1" value="0" disabled>
-            </label>
-            <label class="volume-control" for="volume-slider">
-              <span id="volume-label">Volume 100%</span>
-              <input id="volume-slider" type="range" min="0" max="3" step="0.05" value="1">
             </label>
             <label class="normalize-control">
               <input id="normalize-toggle" type="checkbox">
