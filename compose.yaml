@@ -1,0 +1,21 @@
+services:
+  soundboard:
+    build: .
+    container_name: discord-soundboard
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      STATS_DATABASE: /data/stats.db
+    ports:
+      - "${SOUNDBOARD_PORT:-8000}:8000"
+    volumes:
+      - ./sounds:/media/sounds:ro
+      - soundboard-data:/data
+      # Add more host folders here, then include their container paths in
+      # AUDIO_DIRECTORIES. Example:
+      # - /mnt/music/clips:/media/clips:ro
+
+volumes:
+  soundboard-data:

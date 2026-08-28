@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#17151f">
+    <title>Discord Soundboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#sounds" aria-label="Soundboard home">
+          <span class="brand-mark">S</span>
+          <span><strong>Soundboard</strong><small>Discord audio console</small></span>
+        </a>
+
+        <nav aria-label="Main navigation">
+          <button class="nav-item active" data-page="sounds">
+            <span class="nav-icon">▦</span> Sounds
+          </button>
+          <button class="nav-item" data-page="youtube">
+            <span class="nav-icon">▶</span> YouTube
+          </button>
+          <button class="nav-item" data-page="components"><span class="nav-icon">SYS</span> Components</button>
+          <button class="nav-item" data-page="features"><span class="nav-icon">?</span> Features</button>
+          <button class="nav-item" data-page="stats"><span class="nav-icon">#</span> Stats</button>
+        </nav>
+
+        <div class="connection-card">
+          <span class="status-dot" id="status-dot"></span>
+          <div><strong id="connection-title">Connecting…</strong><small id="connection-copy">Checking Discord</small></div>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div class="destination">
+            <label for="guild-select">Server</label>
+            <select id="guild-select" aria-label="Discord server"></select>
+            <label for="channel-select">Voice channel</label>
+            <select id="channel-select" aria-label="Discord voice channel"></select>
+          </div>
+          <button class="icon-button" id="settings-button" title="Set web API key" aria-label="Set web API key">⚙</button>
+        </header>
+
+        <section class="page active" id="sounds-page">
+          <div class="page-heading">
+            <div><p class="eyebrow">Library</p><h1>Sounds</h1><p>Pick a clip and send it straight to your voice channel.</p></div>
+            <button class="secondary-button" id="refresh-sounds">↻ Refresh library</button>
+          </div>
+          <div class="search-wrap">
+            <span>⌕</span><input id="sound-search" type="search" placeholder="Search sounds or collections…" autocomplete="off">
+          </div>
+          <div id="sound-summary" class="section-label"></div>
+          <div id="sound-grid" class="sound-grid" aria-live="polite"></div>
+        </section>
+
+        <section class="page" id="youtube-page">
+          <div class="page-heading">
+            <div><p class="eyebrow">Music player</p><h1>YouTube</h1><p>Paste a video link to play its audio in Discord.</p></div>
+          </div>
+          <div class="youtube-card">
+            <span class="youtube-logo">▶</span>
+            <div class="youtube-form">
+              <label for="youtube-url">YouTube video URL</label>
+              <div class="input-action">
+                <input id="youtube-url" type="url" placeholder="https://www.youtube.com/watch?v=…">
+                <button class="primary-button" id="play-youtube">Play in Discord</button>
+              </div>
+              <small>Playlists are currently treated as a single video.</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="components-page">
+          <div class="page-heading">
+            <div><p class="eyebrow">Diagnostics</p><h1>Components</h1><p>Runtime health, tools, package versions, and configured storage.</p></div>
+            <button class="secondary-button" id="refresh-components">Refresh status</button>
+          </div>
+          <div id="component-grid" class="component-grid"></div>
+          <h2 class="content-heading">Python packages</h2>
+          <div class="table-card"><table><thead><tr><th>Package</th><th>Version</th><th>Status</th></tr></thead><tbody id="package-rows"></tbody></table></div>
+          <h2 class="content-heading">Audio directories</h2>
+          <div class="table-card"><table><thead><tr><th>Path</th><th>Status</th></tr></thead><tbody id="directory-rows"></tbody></table></div>
+        </section>
+
+        <section class="page" id="features-page">
+          <div class="page-heading"><div><p class="eyebrow">Quick start</p><h1>Features</h1><p>What the soundboard can do and how to use each part.</p></div></div>
+          <div class="guide-grid">
+            <article class="guide-card"><span class="step">01</span><h2>Sound library</h2><p>Play audio files organised into one or more folders.</p><ol><li>Add a supported audio file to a configured folder.</li><li>Open Sounds and refresh the library.</li><li>Choose a server and voice channel, then click the sound.</li></ol></article>
+            <article class="guide-card"><span class="step">02</span><h2>YouTube audio</h2><p>Stream the audio track from a YouTube link.</p><ol><li>Open YouTube and paste a video URL.</li><li>Choose the Discord destination.</li><li>Select Play in Discord. FFmpeg and Node.js must be available.</li></ol></article>
+            <article class="guide-card"><span class="step">03</span><h2>Discord commands</h2><p>Let Discord members play clips without opening the website.</p><ol><li>Join a voice channel.</li><li>Type <code>/soundboard play</code> and select a sound.</li><li>Use stop or leave commands to control playback.</li></ol></article>
+            <article class="guide-card"><span class="step">04</span><h2>Multiple collections</h2><p>Group clips by configuring several folders.</p><ol><li>Add each path to <code>AUDIO_DIRECTORIES</code>.</li><li>Separate paths with commas.</li><li>The folder name appears as the collection.</li></ol></article>
+            <article class="guide-card"><span class="step">05</span><h2>Access protection</h2><p>Protect web controls with the optional API key.</p><ol><li>Set <code>WEB_API_TOKEN</code>.</li><li>Open the gear button in the web UI.</li><li>Enter the same key for this session.</li></ol></article>
+            <article class="guide-card"><span class="step">06</span><h2>Usage analytics</h2><p>See popular sounds, users, methods, and recent activity.</p><ol><li>Set your browser display name on Stats.</li><li>Play sounds from web or Discord.</li><li>Return to Stats and refresh.</li></ol></article>
+            <article class="guide-card"><span class="step">07</span><h2>Component health</h2><p>Check whether the runtime and playback tools are ready.</p><ol><li>Open Components.</li><li>Review status and version details.</li><li>Resolve unavailable tools only when needed.</li></ol></article>
+            <article class="guide-card"><span class="step">08</span><h2>Local exploration</h2><p>Explore without Docker or Discord connectivity.</p><ol><li>Run <code>run-local.cmd</code>.</li><li>The tests run and the browser opens.</li><li>Press Ctrl+C when finished.</li></ol></article>
+          </div>
+        </section>
+
+        <section class="page" id="stats-page">
+          <div class="page-heading">
+            <div><p class="eyebrow">Analytics</p><h1>Stats</h1><p>How the soundboard is being used, by whom, and from where.</p></div>
+            <button class="secondary-button" id="refresh-stats">Refresh stats</button>
+          </div>
+          <div class="identity-card">
+            <div><strong>Your web display name</strong><small>Used to distinguish this browser in future playback stats.</small></div>
+            <input id="client-name" maxlength="80" placeholder="Web user">
+            <button class="secondary-button" id="save-client-name">Save</button>
+          </div>
+          <div id="metric-grid" class="metric-grid"></div>
+          <div class="analytics-grid">
+            <section><h2 class="content-heading">Most-played sounds</h2><div class="table-card"><table><thead><tr><th>Sound</th><th>Plays</th></tr></thead><tbody id="top-sound-rows"></tbody></table></div></section>
+            <section><h2 class="content-heading">Most-active users</h2><div class="table-card"><table><thead><tr><th>User</th><th>Plays</th><th>Unique</th></tr></thead><tbody id="top-user-rows"></tbody></table></div></section>
+            <section><h2 class="content-heading">How it is used</h2><div class="table-card"><table><thead><tr><th>Source</th><th>Type</th><th>Plays</th></tr></thead><tbody id="method-rows"></tbody></table></div></section>
+          </div>
+          <h2 class="content-heading">Recent activity</h2>
+          <div class="table-card"><table><thead><tr><th>When</th><th>Item</th><th>User</th><th>Method</th><th>Destination</th></tr></thead><tbody id="recent-rows"></tbody></table></div>
+        </section>
+
+        <div class="now-playing" id="now-playing" hidden>
+          <div class="equalizer"><i></i><i></i><i></i></div>
+          <div><small>Now playing</small><strong id="now-playing-title"></strong></div>
+          <button id="stop-button">Stop</button>
+          <button id="leave-button">Disconnect</button>
+        </div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </main>
+    </div>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

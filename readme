@@ -1,0 +1,113 @@
+# Discord Soundboard
+
+A Dockerized Discord voice bot with a web control panel. It can scan audio from
+multiple folders, stream YouTube audio, and accept commands from Discord users
+who do not have access to the website.
+
+## Current features
+
+- Separate **Sounds** and **YouTube** pages in the web UI
+- Recursive scanning of multiple audio directories
+- Discord server and voice-channel selection in the UI
+- Discord slash commands with sound-name autocomplete
+- YouTube URL streaming through `yt-dlp` and FFmpeg
+- Stop/disconnect controls and optional web API-key protection
+
+## Set up Discord
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications),
+   create an application, and add a bot.
+2. Copy the bot token. Do not commit or share it.
+3. In **OAuth2 → URL Generator**, select the `bot` and `applications.commands`
+   scopes. Give the bot these permissions: View Channels, Send Messages,
+   Connect, and Speak.
+4. Open the generated URL to invite the bot to your server.
+
+Message Content Intent is not needed because the bot uses slash commands.
+
+## Run with Docker Compose
+
+For deployment on a separate Linux Docker server or Proxmox LXC, follow
+[`DEPLOY.md`](DEPLOY.md). The short version after copying the project is:
+
+```text
+bash deploy.sh
+```
+
+1. Copy `.env.example` to `.env` and set `DISCORD_TOKEN` and
+   `WEB_API_TOKEN`.
+2. Put audio files in `./sounds`.
+3. Start the app:
+
+   ```text
+   docker compose up --build -d
+   ```
+
+4. Open `http://localhost:8000`. Use the gear button to enter the same
+   `WEB_API_TOKEN` stored in `.env`.
+
+The API key is kept in browser session storage, so it is forgotten when that
+browser session ends. If this UI is exposed outside your private network, put it
+behind HTTPS and an authentication-aware reverse proxy as well.
+
+## Use multiple audio folders
+
+Mount every host folder read-only in `compose.yaml`:
+
+```yaml
+volumes:
+  - ./sounds:/media/sounds:ro
+  - D:/Shared/Memes:/media/memes:ro
+  - D:/Shared/Intros:/media/intros:ro
+```
+
+Then list the paths *inside the container* in `.env`:
+
+```dotenv
+AUDIO_DIRECTORIES=/media/sounds,/media/memes,/media/intros
+```
+
+Supported formats are AAC, FLAC, M4A, MP3, OGG, Opus, WAV, and WebM. Changes
+appear whenever the library is refreshed; a container restart is not required.
+
+## Discord commands
+
+- `/soundboard play` — choose and play a library sound
+- `/soundboard youtube` — play a YouTube URL
+- `/soundboard stop` — stop playback
+- `/soundboard leave` — disconnect the bot from voice
+
+The user issuing `play` or `youtube` must already be in a voice channel. Starting
+a new item replaces the currently playing item for that server.
+
+## Local development
+
+FFmpeg and Node.js must be installed and available on `PATH`. Node.js is used by
+`yt-dlp` for current YouTube extraction; both dependencies are already included
+in the Docker image.
+
+### Explore locally without Docker or admin access
+
+Once the portable test environment has been created in `.tools`, run:
+
+```bat
+run-local.cmd
+```
+
+This runs the tests, scans `./sounds`, opens the web UI at
+`http://127.0.0.1:8000`, and leaves Discord disabled. Press Ctrl+C to stop it.
+Pass a port as the first argument if 8000 is busy. For example,
+`run-local.cmd 8080`. Add `skip-tests` as the second argument for a faster
+restart: `run-local.cmd 8000 skip-tests`. Voice playback and YouTube extraction
+still require FFmpeg (and current YouTube extraction may require Node.js).
+
+```text
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload
+pytest
+```
+
+The app will still start without `DISCORD_TOKEN`, which is useful for working on
+the UI, though playback and server selection will be unavailable.

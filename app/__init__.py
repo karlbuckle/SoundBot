@@ -1,0 +1,1 @@
+"""Discord Soundboard application package."""
