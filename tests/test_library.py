@@ -28,3 +28,15 @@ def test_get_only_returns_scanned_audio(tmp_path: Path) -> None:
 
     assert library.get(sound.id) is not None
     assert library.get("../../etc/passwd") is None
+
+
+def test_scans_subfolders_with_relative_paths_for_browsing(tmp_path: Path) -> None:
+    library_root = tmp_path / "soundboard"
+    nested = library_root / "memes" / "classic"
+    nested.mkdir(parents=True)
+    (nested / "airhorn.mp3").touch()
+
+    sound = AudioLibrary((library_root,)).all()[0]
+
+    assert sound.collection == "soundboard"
+    assert sound.relative_path == "memes/classic/airhorn.mp3"
