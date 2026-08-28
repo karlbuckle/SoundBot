@@ -1,9 +1,19 @@
-const state = { guilds: [], sounds: [], seeking: false, applyingPlaybackControl: false };
+const state = {
+  guilds: [],
+  sounds: [],
+  soundFilters: { collection: "", folder: "" },
+  seeking: false,
+  applyingPlaybackControl: false,
+};
 const elements = {
   guild: document.querySelector("#guild-select"),
   channel: document.querySelector("#channel-select"),
   grid: document.querySelector("#sound-grid"),
+  soundSearch: document.querySelector("#sound-search"),
   summary: document.querySelector("#sound-summary"),
+  soundOverview: document.querySelector("#sound-overview"),
+  collectionFilters: document.querySelector("#collection-filters"),
+  folderFilters: document.querySelector("#folder-filters"),
   toast: document.querySelector("#toast"),
   nowPlaying: document.querySelector("#now-playing"),
   nowTitle: document.querySelector("#now-playing-title"),
@@ -100,34 +110,187 @@ function renderNowPlaying(status) {
   elements.nowPlaying.hidden = false;
 }
 
-function renderSounds() {
-  const query = document.querySelector("#sound-search").value.toLowerCase().trim();
-  const filtered = state.sounds.filter((sound) =>
-    `${sound.name} ${sound.collection} ${sound.relative_path}`.toLowerCase().includes(query)
+function folderKey(sound) {
+  const parts = sound.relative_path.split("/");
+  return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+}
+
+function folderToken(sound) {
+  return `${sound.collection}::${folderKey(sound)}`;
+}
+
+function displayFolder(folder) {
+  return folder ? folder.split("/").join(" / ") : "Root";
+}
+
+function chip(label, active, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `filter-chip${active ? " active" : ""}`;
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function availableFolders() {
+  const source = state.soundFilters.collection
+    ? state.sounds.filter((sound) => sound.collection === state.soundFilters.collection)
+    : state.sounds;
+  const folders = new Map();
+  source.forEach((sound) => {
+    const token = folderToken(sound);
+    if (!folders.has(token)) {
+      folders.set(token, {
+        token,
+        collection: sound.collection,
+        folder: folderKey(sound),
+      });
+    }
+  });
+  return [...folders.values()].sort((left, right) =>
+    `${left.collection}/${left.folder}`.localeCompare(`${right.collection}/${right.folder}`)
   );
-  elements.summary.textContent = `${filtered.length} sound${filtered.length === 1 ? "" : "s"}`;
+}
+
+function filteredSounds() {
+  const query = elements.soundSearch.value.toLowerCase().trim();
+  return state.sounds.filter((sound) => {
+    if (state.soundFilters.collection && sound.collection !== state.soundFilters.collection) return false;
+    if (state.soundFilters.folder && folderToken(sound) !== state.soundFilters.folder) return false;
+    return `${sound.name} ${sound.collection} ${sound.relative_path}`.toLowerCase().includes(query);
+  });
+}
+
+function renderSoundOverview(filtered) {
+  const collections = new Set(filtered.map((sound) => sound.collection));
+  const folders = new Set(filtered.map((sound) => folderToken(sound)));
+  const metrics = [
+    ["Visible sounds", filtered.length],
+    ["Collections", collections.size],
+    ["Folders", folders.size],
+  ];
+  elements.soundOverview.replaceChildren();
+  metrics.forEach(([label, value]) => {
+    const card = document.createElement("article");
+    const number = document.createElement("strong");
+    number.textContent = value;
+    const caption = document.createElement("span");
+    caption.textContent = label;
+    card.append(number, caption);
+    elements.soundOverview.append(card);
+  });
+}
+
+function renderBrowseFilters() {
+  const collections = [...new Set(state.sounds.map((sound) => sound.collection))].sort((left, right) => left.localeCompare(right));
+  const folders = availableFolders();
+  if (state.soundFilters.folder && !folders.some((folder) => folder.token === state.soundFilters.folder)) {
+    state.soundFilters.folder = "";
+  }
+  elements.collectionFilters.replaceChildren(
+    chip(`All (${state.sounds.length})`, !state.soundFilters.collection, () => {
+      state.soundFilters.collection = "";
+      state.soundFilters.folder = "";
+      renderSounds();
+    }),
+  );
+  collections.forEach((collection) => {
+    const count = state.sounds.filter((sound) => sound.collection === collection).length;
+    elements.collectionFilters.append(
+      chip(`${collection} (${count})`, state.soundFilters.collection === collection, () => {
+        state.soundFilters.collection = state.soundFilters.collection === collection ? "" : collection;
+        state.soundFilters.folder = "";
+        renderSounds();
+      }),
+    );
+  });
+  elements.folderFilters.replaceChildren(
+    chip(`All (${folders.length})`, !state.soundFilters.folder, () => {
+      state.soundFilters.folder = "";
+      renderSounds();
+    }),
+  );
+  folders.forEach((folder) => {
+    const label = state.soundFilters.collection
+      ? `${displayFolder(folder.folder)}`
+      : `${folder.collection} / ${displayFolder(folder.folder)}`;
+    const count = state.sounds.filter((sound) => folderToken(sound) === folder.token).length;
+    elements.folderFilters.append(
+      chip(`${label} (${count})`, state.soundFilters.folder === folder.token, () => {
+        state.soundFilters.folder = state.soundFilters.folder === folder.token ? "" : folder.token;
+        renderSounds();
+      }),
+    );
+  });
+}
+
+function renderSounds() {
+  const filtered = filteredSounds();
+  renderBrowseFilters();
+  renderSoundOverview(filtered);
+  const folderCount = new Set(filtered.map((sound) => folderToken(sound))).size;
+  elements.summary.textContent = `${filtered.length} sound${filtered.length === 1 ? "" : "s"} across ${folderCount} folder${folderCount === 1 ? "" : "s"}`;
   elements.grid.replaceChildren();
   if (!filtered.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = state.sounds.length ? "No sounds match your search." : "No audio files found in the configured directories.";
+    empty.textContent = state.sounds.length ? "No sounds match the current search or folder filters." : "No audio files found in the configured directories.";
     elements.grid.append(empty);
     return;
   }
+  const groups = new Map();
   filtered.forEach((sound) => {
-    const button = document.createElement("button");
-    button.className = "sound-card";
-    const icon = document.createElement("span");
-    icon.className = "play-symbol";
-    icon.textContent = "▶";
-    const title = document.createElement("strong");
-    title.textContent = sound.name;
-    const collection = document.createElement("small");
-    collection.textContent = sound.collection;
-    button.append(icon, title, collection);
-    button.addEventListener("click", () => playSound(sound));
-    elements.grid.append(button);
+    const token = folderToken(sound);
+    if (!groups.has(token)) groups.set(token, []);
+    groups.get(token).push(sound);
   });
+  [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .forEach(([token, sounds]) => {
+      const section = document.createElement("section");
+      section.className = "sound-group";
+      const heading = document.createElement("div");
+      heading.className = "sound-group-heading";
+      const titleWrap = document.createElement("div");
+      const title = document.createElement("h2");
+      title.textContent = displayFolder(folderKey(sounds[0]));
+      const detail = document.createElement("small");
+      detail.textContent = `${sounds[0].collection} · ${sounds.length} sound${sounds.length === 1 ? "" : "s"}`;
+      titleWrap.append(title, detail);
+      heading.append(titleWrap);
+      section.append(heading);
+      const groupGrid = document.createElement("div");
+      groupGrid.className = "sound-grid";
+      sounds.forEach((sound) => {
+        const button = document.createElement("button");
+        button.className = "sound-card";
+        const icon = document.createElement("span");
+        icon.className = "play-symbol";
+        icon.textContent = "▶";
+        const cardTitle = document.createElement("strong");
+        cardTitle.textContent = sound.name;
+        const collection = document.createElement("small");
+        collection.textContent = sound.collection;
+        const location = document.createElement("span");
+        location.className = "sound-path";
+        location.textContent = sound.relative_path;
+        button.append(icon, cardTitle, collection, location);
+        button.addEventListener("click", () => playSound(sound));
+        groupGrid.append(button);
+      });
+      section.append(groupGrid);
+      elements.grid.append(section);
+    });
+}
+
+function refreshSounds(data) {
+  state.sounds = data;
+  const collections = new Set(data.map((sound) => sound.collection));
+  if (state.soundFilters.collection && !collections.has(state.soundFilters.collection)) {
+    state.soundFilters.collection = "";
+    state.soundFilters.folder = "";
+  }
+  renderSounds();
 }
 
 async function playSound(sound) {
@@ -230,12 +393,11 @@ async function load() {
       api("/api/health"), api("/api/discord/guilds"), api("/api/sounds"),
     ]);
     state.guilds = guilds;
-    state.sounds = sounds;
+    refreshSounds(sounds);
     setOptions(elements.guild, guilds, "Choose server");
     if (guilds.length === 1) elements.guild.value = guilds[0].id;
     updateChannels();
     startPlaybackPolling();
-    renderSounds();
     document.querySelector("#status-dot").classList.toggle("online", health.discord_ready);
     document.querySelector("#connection-title").textContent = health.discord_ready ? "Discord online" : "Discord offline";
     document.querySelector("#connection-copy").textContent = health.discord_ready ? `${guilds.length} server${guilds.length === 1 ? "" : "s"}` : "Check bot token";
@@ -278,7 +440,7 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
 }));
 
 elements.guild.addEventListener("change", updateChannels);
-document.querySelector("#sound-search").addEventListener("input", renderSounds);
+elements.soundSearch.addEventListener("input", renderSounds);
 document.querySelector("#refresh-sounds").addEventListener("click", load);
 document.querySelector("#settings-button").addEventListener("click", setApiKey);
 document.querySelector("#refresh-components").addEventListener("click", loadComponents);

@@ -7,6 +7,7 @@ who do not have access to the website.
 ## Current features
 
 - Separate **Sounds** and **YouTube** pages in the web UI
+- Sounds page auto-detects collections and nested subfolders for browsing
 - Recursive scanning of multiple audio directories
 - Discord server and voice-channel selection in the UI
 - Discord slash commands with sound-name autocomplete

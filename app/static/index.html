@@ -52,14 +52,27 @@
 
         <section class="page active" id="sounds-page">
           <div class="page-heading">
-            <div><p class="eyebrow">Library</p><h1>Sounds</h1><p>Pick a clip and send it straight to your voice channel.</p></div>
+            <div><p class="eyebrow">Library</p><h1>Sounds</h1><p>Browse collections, drill into detected subfolders, and play a clip instantly.</p></div>
             <button class="secondary-button" id="refresh-sounds">↻ Refresh library</button>
           </div>
-          <div class="search-wrap">
-            <span>⌕</span><input id="sound-search" type="search" placeholder="Search sounds or collections…" autocomplete="off">
+          <div id="sound-overview" class="sound-overview"></div>
+          <div class="sound-browser">
+            <div class="search-wrap sound-search">
+              <span>⌕</span><input id="sound-search" type="search" placeholder="Search sounds, collections, or subfolders…" autocomplete="off">
+            </div>
+            <div class="browse-panel">
+              <div>
+                <div class="section-label">Collections</div>
+                <div id="collection-filters" class="filter-chips"></div>
+              </div>
+              <div>
+                <div class="section-label">Folders</div>
+                <div id="folder-filters" class="filter-chips"></div>
+              </div>
+            </div>
           </div>
           <div id="sound-summary" class="section-label"></div>
-          <div id="sound-grid" class="sound-grid" aria-live="polite"></div>
+          <div id="sound-grid" class="sound-groups" aria-live="polite"></div>
         </section>
 
         <section class="page" id="youtube-page">
