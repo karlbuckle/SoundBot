@@ -121,7 +121,21 @@
 
         <div class="now-playing" id="now-playing" hidden>
           <div class="equalizer"><i></i><i></i><i></i></div>
-          <div><small>Now playing</small><strong id="now-playing-title"></strong></div>
+          <div class="now-meta"><small>Now playing</small><strong id="now-playing-title"></strong></div>
+          <div class="player-controls">
+            <label class="seek-control" for="seek-slider">
+              <span id="seek-time">0:00 / 0:00</span>
+              <input id="seek-slider" type="range" min="0" max="0" step="0.1" value="0" disabled>
+            </label>
+            <label class="volume-control" for="volume-slider">
+              <span id="volume-label">Volume 100%</span>
+              <input id="volume-slider" type="range" min="0" max="3" step="0.05" value="1">
+            </label>
+            <label class="normalize-control">
+              <input id="normalize-toggle" type="checkbox">
+              <span>Normalize</span>
+            </label>
+          </div>
           <button id="stop-button">Stop</button>
           <button id="leave-button">Disconnect</button>
         </div>
