@@ -123,6 +123,12 @@ Per-person sliders on the Clips page fine-tune anyone who still sounds off.
 Sounds played by the bot are included as their own "Soundboard" track.
 **Disconnect** (or `/soundboard leave`) stops recording and clears the buffer.
 
+Click **Edit** on a saved clip to trim it and change each person's level in
+the browser. Drag across the waveform to choose the part to keep, preview it,
+then save it as a new clip or replace the original. Clips keep one track per
+speaker (in a `.stems` folder next to the clip) so levels can be changed after
+saving; clips saved before this existed can be trimmed only.
+
 Make sure everyone in the channel knows they may be recorded. To go back to
 stock discord.py, set `ENABLE_RECORDING=false` and rerun `bash deploy.sh`.
 
