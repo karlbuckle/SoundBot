@@ -5,6 +5,7 @@
 .pytest-tmp
 .tools
 .venv
+.venv-recording
 __pycache__
 *.py[cod]
 data

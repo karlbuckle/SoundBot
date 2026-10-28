@@ -14,6 +14,8 @@ who do not have access to the website.
   whatever is playing; volume changes take effect instantly
 - Recursive scanning of multiple audio directories
 - Discord server and voice-channel selection in the UI
+- Optional always-on voice recording: save the last minute of voice chat as
+  a clip, with each speaker's loudness evened out automatically
 - Discord slash commands with sound-name autocomplete
 - YouTube URL streaming through `yt-dlp` and FFmpeg
 - Stop/disconnect controls and optional web API-key protection
@@ -82,6 +84,7 @@ restart is not required.
 - `/soundboard youtube` — play a YouTube URL
 - `/soundboard settings` — show or change this server's default volume and
   normalize (changing them requires the Manage Server permission)
+- `/soundboard clip` — save the last minute of voice chat (recording must be on)
 - `/soundboard stop` — stop playback
 - `/soundboard leave` — disconnect the bot from voice
 
@@ -94,6 +97,32 @@ The library is cached and rescanned at most once a minute, or immediately when
 
 The user issuing `play` or `youtube` must already be in a voice channel. Starting
 a new item replaces the currently playing item for that server.
+
+## Voice clips (experimental)
+
+The bot can keep a rolling recording of its voice channel and save the last
+minute on demand. Discord encrypts voice end to end, and stock discord.py
+cannot receive it, so this uses
+[discord-ext-voice-recv](https://github.com/zacker150/discord-ext-voice-recv),
+which replaces discord.py with a fork. It is off by default.
+
+1. Set `ENABLE_RECORDING=true` in `.env` and rerun `bash deploy.sh` to rebuild.
+2. Open **Clips**, choose a server and voice channel, and click
+   **Start recording**. The bot joins and stays in that channel, and rejoins
+   after restarts and dropped connections until recording is stopped.
+3. Click **Save last minute** in the top bar (or run `/soundboard clip`).
+   Clips are saved to the data volume (`/data/clips`) and can be played,
+   downloaded, or deleted from the Clips page.
+
+Only the last 60 seconds are kept in memory (`RECORDING_SECONDS` changes this);
+nothing is written to disk until a clip is saved. Each speaker is recorded
+separately, so their loudness is evened out automatically before mixing.
+Per-person sliders on the Clips page fine-tune anyone who still sounds off.
+Sounds played by the bot are included as their own "Soundboard" track.
+**Disconnect** (or `/soundboard leave`) stops recording and clears the buffer.
+
+Make sure everyone in the channel knows they may be recorded. To go back to
+stock discord.py, set `ENABLE_RECORDING=false` and rerun `bash deploy.sh`.
 
 ## Local development
 

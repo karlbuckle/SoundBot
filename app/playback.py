@@ -5,10 +5,36 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import subprocess
 import time
+from typing import Callable
 
 import discord
 
 from app.youtube import extract_youtube_track
+
+
+PlaybackTap = Callable[[int, bytes], None]
+
+
+class TappedVolumeTransformer(discord.PCMVolumeTransformer):
+    """Volume control that also hands each played frame to a tap (the recorder)."""
+
+    def __init__(self, original: discord.AudioSource, volume: float, tap: Callable[[bytes], None] | None):
+        super().__init__(original, volume=volume)
+        self._tap = tap
+
+    def read(self) -> bytes:
+        data = super().read()
+        if data and self._tap is not None:
+            try:
+                self._tap(data)
+            except Exception as exc:  # never let recording break playback
+                print(f"Playback tap failed: {exc}")
+        return data
+
+
+def stop_audio(voice: discord.VoiceClient) -> None:
+    """Stop playback only. The recording client's stop() would also stop listening."""
+    getattr(voice, "stop_playing", voice.stop)()
 
 
 @dataclass
@@ -33,6 +59,13 @@ class PlaybackService:
         self.states: dict[int, PlaybackState] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._play_ids: dict[int, int] = {}
+        # Set by the recording service when voice recording is available.
+        self.voice_client_class: type[discord.VoiceClient] = discord.VoiceClient
+        self.tap: PlaybackTap | None = None
+
+    async def connect(self, guild_id: int, channel_id: int) -> discord.VoiceClient:
+        """Join (or move to) a voice channel without playing anything."""
+        return await self._voice_client(guild_id, channel_id)
 
     async def _voice_client(self, guild_id: int, channel_id: int) -> discord.VoiceClient:
         guild = self.bot.get_guild(guild_id)
@@ -44,7 +77,7 @@ class PlaybackService:
 
         voice = guild.voice_client
         if voice is None:
-            return await channel.connect()
+            return await channel.connect(cls=self.voice_client_class)
         if voice.channel.id != channel.id:
             await voice.move_to(channel)
         return voice
@@ -76,8 +109,7 @@ class PlaybackService:
         except (OSError, ValueError, subprocess.SubprocessError):
             return None
 
-    @staticmethod
-    def _build_source(state: PlaybackState) -> discord.PCMVolumeTransformer:
+    def _build_source(self, guild_id: int, state: PlaybackState) -> discord.PCMVolumeTransformer:
         before_options = state.before_options.strip()
         if state.offset_seconds > 0:
             before_options = f"{before_options} -ss {state.offset_seconds:.3f}".strip()
@@ -88,7 +120,10 @@ class PlaybackService:
             state.input_source, before_options=before_options or None, options=options
         )
         # Volume is applied in Python so it can change without restarting FFmpeg.
-        return discord.PCMVolumeTransformer(audio, volume=max(0.0, state.volume))
+        tap = self.tap
+        return TappedVolumeTransformer(
+            audio, max(0.0, state.volume), (lambda pcm: tap(guild_id, pcm)) if tap else None
+        )
 
     def _current_position(self, state: PlaybackState, *, paused: bool) -> float:
         elapsed = 0.0 if paused else max(0.0, time.monotonic() - state.started_monotonic)
@@ -102,12 +137,12 @@ class PlaybackService:
         async with lock:
             voice = await self._voice_client(guild_id, state.channel_id)
             if voice.is_playing() or voice.is_paused():
-                voice.stop()
+                stop_audio(voice)
             state.play_id = self._play_ids.get(guild_id, 0) + 1
             self._play_ids[guild_id] = state.play_id
             play_id = state.play_id
             state.started_monotonic = time.monotonic()
-            source = self._build_source(state)
+            source = self._build_source(guild_id, state)
             self.states[guild_id] = state
             loop = asyncio.get_running_loop()
 
@@ -230,7 +265,7 @@ class PlaybackService:
     def stop(self, guild_id: int) -> bool:
         guild = self.bot.get_guild(guild_id)
         if guild and guild.voice_client and (guild.voice_client.is_playing() or guild.voice_client.is_paused()):
-            guild.voice_client.stop()
+            stop_audio(guild.voice_client)
             self.states.pop(guild_id, None)
             return True
         return False

@@ -13,6 +13,9 @@ class Settings:
     host: str
     port: int
     stats_database: Path
+    enable_recording: bool
+    recording_seconds: float
+    clips_directory: Path
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -29,4 +32,7 @@ class Settings:
             host=os.getenv("HOST", "0.0.0.0"),
             port=int(os.getenv("PORT", "8000")),
             stats_database=Path(os.getenv("STATS_DATABASE", "data/stats.db")).expanduser(),
+            enable_recording=os.getenv("ENABLE_RECORDING", "false").strip().lower() in {"1", "true", "yes", "on"},
+            recording_seconds=float(os.getenv("RECORDING_SECONDS", "60")),
+            clips_directory=Path(os.getenv("CLIPS_DIRECTORY", "data/clips")).expanduser(),
         )

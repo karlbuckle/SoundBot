@@ -4,6 +4,8 @@ const state = {
   soundFilters: { collection: "", folder: "" },
   seeking: false,
   favourites: new Set(),
+  recording: null,
+  recordingAvailable: false,
   adjustingVolume: false,
   applyingPlaybackControl: false,
 };
@@ -525,10 +527,196 @@ async function load(refreshLibrary = false) {
     document.querySelector("#status-dot").classList.toggle("online", health.discord_ready);
     document.querySelector("#connection-title").textContent = health.discord_ready ? "Discord online" : "Discord offline";
     document.querySelector("#connection-copy").textContent = health.discord_ready ? `${guilds.length} server${guilds.length === 1 ? "" : "s"}` : "Check bot token";
+    state.recordingAvailable = Boolean(health.recording_available);
+    await loadRecordingStatus();
+    scheduleRecordingPoll();
   } catch (error) {
     notify(error.message, true);
     if (error.message.toLowerCase().includes("api key")) setApiKey();
   }
+}
+
+// --- Voice recording and clips -------------------------------------------
+
+let recordingPoller = null;
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function renderRecording(status) {
+  state.recording = status;
+  const recording = Boolean(status?.recording);
+  const available = Boolean(status?.available);
+  const listening = Boolean(status?.listening);
+  document.querySelector("#save-clip-top").hidden = !recording;
+  document.querySelector("#rec-indicator").className = `rec-indicator${recording ? (listening ? " live" : " waiting") : ""}`;
+  const title = document.querySelector("#recorder-title");
+  const detail = document.querySelector("#recorder-detail");
+  const toggle = document.querySelector("#toggle-recording");
+  if (!elements.guild.value) {
+    title.textContent = "Choose a server";
+    detail.textContent = "Pick a server and voice channel in the top bar.";
+  } else if (!available) {
+    title.textContent = "Recording unavailable";
+    detail.textContent = status?.reason || "Recording is switched off on the server.";
+  } else if (recording) {
+    title.textContent = listening ? `Recording #${status.channel_name || "voice"}` : `Reconnecting to #${status.channel_name || "voice"}…`;
+    detail.textContent = `Keeping the last ${Math.round(status.seconds)} seconds. Older audio is discarded automatically.`;
+  } else {
+    title.textContent = "Not recording";
+    detail.textContent = "Start recording to keep a rolling buffer of the voice channel chosen in the top bar.";
+  }
+  toggle.disabled = !available || !elements.guild.value;
+  toggle.textContent = recording ? "Stop recording" : "Start recording";
+  document.querySelector("#save-clip").disabled = !recording;
+  renderSpeakers(status?.speakers || [], recording);
+}
+
+function renderSpeakers(speakers, recording) {
+  const container = document.querySelector("#speaker-levels");
+  // Don't rebuild the sliders while someone is dragging one.
+  if (container.contains(document.activeElement) && document.activeElement.type === "range") return;
+  container.replaceChildren();
+  if (!speakers.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = recording ? "Nobody has spoken in the last minute." : "Speakers appear here once recording has picked them up.";
+    container.append(empty);
+    return;
+  }
+  [...speakers]
+    .sort((left, right) => Number(left.is_soundboard) - Number(right.is_soundboard) || left.name.localeCompare(right.name))
+    .forEach((speaker) => {
+      const row = document.createElement("label");
+      row.className = "speaker-row";
+      const name = document.createElement("span");
+      name.className = "speaker-name";
+      name.textContent = speaker.is_soundboard ? "🔊 Soundboard" : speaker.name;
+      const heard = document.createElement("small");
+      heard.textContent = speaker.is_soundboard ? "Sounds the bot played · not auto-levelled" : `${Math.round(speaker.seconds)}s of speech in the buffer`;
+      name.append(heard);
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = "0";
+      slider.max = "4";
+      slider.step = "0.05";
+      slider.value = String(speaker.gain);
+      slider.setAttribute("aria-label", `Level for ${speaker.name}`);
+      const value = document.createElement("b");
+      value.textContent = `${Math.round(speaker.gain * 100)}%`;
+      slider.addEventListener("input", () => { value.textContent = `${Math.round(Number(slider.value) * 100)}%`; });
+      slider.addEventListener("change", async () => {
+        try {
+          renderRecording(await api("/api/recording/gain", {
+            method: "POST",
+            body: JSON.stringify({ guild_id: elements.guild.value, speaker_key: speaker.key, gain: Number(slider.value) }),
+          }));
+        } catch (error) { notify(error.message, true); }
+      });
+      row.append(name, slider, value);
+      container.append(row);
+    });
+}
+
+async function loadRecordingStatus() {
+  if (!elements.guild.value || !state.recordingAvailable) {
+    renderRecording(state.recordingAvailable ? null : { available: false, reason: "Recording is switched off on the server. Set ENABLE_RECORDING=true in .env and rerun deploy.sh." });
+    return;
+  }
+  try { renderRecording(await api(`/api/recording/${elements.guild.value}`)); } catch (_error) { /* best effort */ }
+}
+
+function scheduleRecordingPoll() {
+  clearTimeout(recordingPoller);
+  const onClips = document.querySelector("#clips-page").classList.contains("active");
+  if (document.hidden || !state.recordingAvailable) return;
+  // Refresh speaker levels often on the Clips page, otherwise just keep the top-bar button current.
+  recordingPoller = setTimeout(async () => { await loadRecordingStatus(); scheduleRecordingPoll(); }, onClips ? 3000 : 15000);
+}
+
+async function loadClips() {
+  try {
+    const clips = await api("/api/clips");
+    const body = document.querySelector("#clip-rows");
+    fillTable("clip-rows", clips.map((clip) => {
+      const actions = document.createElement("div");
+      actions.className = "clip-actions";
+      const play = document.createElement("button");
+      play.className = "secondary-button";
+      play.textContent = "▶ Play";
+      play.addEventListener("click", () => playClip(clip.name));
+      const download = document.createElement("button");
+      download.className = "secondary-button";
+      download.textContent = "Download";
+      download.addEventListener("click", () => downloadClip(clip.name));
+      const remove = document.createElement("button");
+      remove.className = "secondary-button danger";
+      remove.textContent = "Delete";
+      remove.addEventListener("click", () => deleteClip(clip.name));
+      actions.append(play, download, remove);
+      return [clip.name, new Date(clip.created_at).toLocaleString(), formatBytes(clip.size), actions];
+    }), "No clips saved yet.", 4);
+    body.querySelectorAll("tr td:first-child").forEach((cell) => { cell.title = cell.textContent; });
+  } catch (error) { notify(error.message, true); }
+}
+
+// Clips need the API key header, so fetch them as blobs rather than linking directly.
+async function fetchClip(name) {
+  const response = await fetch(`/api/clips/${encodeURIComponent(name)}`, { headers: { "X-API-Key": apiKey() } });
+  if (!response.ok) throw new Error(`Could not load clip (${response.status})`);
+  return response.blob();
+}
+
+async function playClip(name) {
+  try {
+    const player = document.querySelector("#clip-player");
+    if (player.src) URL.revokeObjectURL(player.src);
+    player.src = URL.createObjectURL(await fetchClip(name));
+    player.hidden = false;
+    await player.play().catch(() => notify("This browser can't play that clip. Try Download instead.", true));
+  } catch (error) { notify(error.message, true); }
+}
+
+async function downloadClip(name) {
+  try {
+    const url = URL.createObjectURL(await fetchClip(name));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (error) { notify(error.message, true); }
+}
+
+async function deleteClip(name) {
+  if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+  try {
+    await api(`/api/clips/${encodeURIComponent(name)}`, { method: "DELETE" });
+    notify("Clip deleted");
+    loadClips();
+  } catch (error) { notify(error.message, true); }
+}
+
+async function saveClip() {
+  const buttons = [document.querySelector("#save-clip"), document.querySelector("#save-clip-top")];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const clip = await api("/api/recording/save", { method: "POST", body: JSON.stringify({ guild_id: elements.guild.value }) });
+    notify(`Saved ${clip.name}`);
+    loadClips();
+  } catch (error) { notify(error.message, true); }
+  buttons.forEach((button) => { button.disabled = false; });
+}
+
+async function toggleRecording() {
+  try {
+    const recording = state.recording?.recording;
+    const body = recording ? { guild_id: elements.guild.value } : destination();
+    renderRecording(await api(`/api/recording/${recording ? "stop" : "start"}`, { method: "POST", body: JSON.stringify(body) }));
+    notify(recording ? "Recording stopped and buffer cleared" : "Recording started");
+  } catch (error) { notify(error.message, true); }
 }
 
 function setApiKey() {
@@ -545,11 +733,24 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   history.replaceState(null, "", `#${button.dataset.page}`);
   if (button.dataset.page === "components") loadComponents();
   if (button.dataset.page === "stats") loadStats();
+  if (button.dataset.page === "clips") {
+    loadClips();
+    loadRecordingStatus();
+  }
+  scheduleRecordingPoll();
 }));
 
 elements.guild.addEventListener("change", () => {
   updateChannels();
   startPlaybackPolling();
+  loadRecordingStatus();
+});
+document.querySelector("#toggle-recording").addEventListener("click", toggleRecording);
+document.querySelector("#save-clip").addEventListener("click", saveClip);
+document.querySelector("#save-clip-top").addEventListener("click", saveClip);
+document.querySelector("#refresh-clips").addEventListener("click", () => {
+  loadClips();
+  loadRecordingStatus();
 });
 elements.soundSearch.addEventListener("input", renderSounds);
 elements.soundSort.addEventListener("change", () => {
@@ -561,8 +762,14 @@ elements.groupToggle.addEventListener("change", () => {
   renderSounds();
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) clearTimeout(playbackPoller);
-  else startPlaybackPolling();
+  if (document.hidden) {
+    clearTimeout(playbackPoller);
+    clearTimeout(recordingPoller);
+  } else {
+    startPlaybackPolling();
+    loadRecordingStatus();
+    scheduleRecordingPoll();
+  }
 });
 elements.defaultsVolume.addEventListener("input", () => {
   elements.defaultsVolumeLabel.textContent = `Volume ${Math.round(Number(elements.defaultsVolume.value) * 100)}%`;
@@ -617,7 +824,8 @@ document.querySelector("#leave-button").addEventListener("click", async () => {
     const { guild_id } = destination();
     await api("/api/play/leave", { method: "POST", body: JSON.stringify({ guild_id }) });
     elements.nowPlaying.hidden = true;
-    notify("Disconnected from voice");
+    notify(state.recording?.recording ? "Disconnected and stopped recording" : "Disconnected from voice");
+    loadRecordingStatus();
   } catch (error) { notify(error.message, true); }
 });
 elements.volumeSlider.addEventListener("input", () => {
@@ -682,6 +890,6 @@ elements.seekSlider.addEventListener("change", async () => {
 });
 
 const route = location.hash.slice(1);
-if (["sounds", "youtube", "components", "features", "stats", "settings"].includes(route)) document.querySelector(`[data-page="${route}"]`).click();
+if (["sounds", "youtube", "components", "features", "clips", "stats", "settings"].includes(route)) document.querySelector(`[data-page="${route}"]`).click();
 loadPreferences();
 load();

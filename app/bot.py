@@ -6,14 +6,25 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.clips import ClipStore
 from app.library import AudioLibrary
 from app.playback import PlaybackService
 from app.preferences import GuildPreferences, PlaybackDefaults
 from app.stats import UsageStats
+from app.voice_recording import RecordingService
 
 
 class SoundboardBot(commands.Bot):
-    def __init__(self, library: AudioLibrary, stats: UsageStats, preferences: GuildPreferences):
+    def __init__(
+        self,
+        library: AudioLibrary,
+        stats: UsageStats,
+        preferences: GuildPreferences,
+        clips: ClipStore,
+        *,
+        enable_recording: bool = False,
+        recording_seconds: float = 60.0,
+    ):
         intents = discord.Intents.none()
         intents.guilds = True
         intents.voice_states = True
@@ -22,10 +33,26 @@ class SoundboardBot(commands.Bot):
         self.stats = stats
         self.preferences = preferences
         self.playback = PlaybackService(self)
+        self.recording = RecordingService(
+            self, preferences, clips, enabled=enable_recording, seconds=recording_seconds
+        )
+        if self.recording.available:
+            self.playback.voice_client_class = self.recording.voice_client_class
+            self.playback.tap = self.recording.tap_playback
 
     async def setup_hook(self) -> None:
         self.tree.add_command(SoundboardCommands(self))
         await self.tree.sync()
+        if self.recording.available:
+            self.loop.create_task(self.recording.watchdog())
+        elif "ENABLE_RECORDING" not in self.recording.unavailable_reason:
+            print(f"Voice recording unavailable: {self.recording.unavailable_reason}")
+
+    async def leave_voice(self, guild_id: int) -> bool:
+        """Disconnect from voice; this also switches recording off for the server."""
+        if self.recording.is_recording(guild_id):
+            await self.recording.stop(guild_id)
+        return await self.playback.leave(guild_id)
 
     async def on_ready(self) -> None:
         print(f"Discord bot logged in as {self.user} ({self.user.id if self.user else 'unknown'})")
@@ -189,5 +216,23 @@ class SoundboardCommands(app_commands.Group):
         if interaction.guild_id is None:
             await interaction.response.send_message("Use this in a server.", ephemeral=True)
             return
-        left = await self.bot.playback.leave(interaction.guild_id)
-        await interaction.response.send_message("Disconnected." if left else "I am not in voice.")
+        was_recording = self.bot.recording.is_recording(interaction.guild_id)
+        left = await self.bot.leave_voice(interaction.guild_id)
+        if was_recording:
+            await interaction.response.send_message("Disconnected and stopped recording.")
+        else:
+            await interaction.response.send_message("Disconnected." if left else "I am not in voice.")
+
+    @app_commands.command(name="clip", description="Save the last minute of voice chat")
+    async def clip(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Use this in a server.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        try:
+            clip = await self.bot.recording.save_clip(interaction.guild_id)
+            await interaction.followup.send(
+                f"🎙️ Saved the last minute as **{clip['name']}**. Download it from the web UI's Clips page."
+            )
+        except Exception as exc:
+            await interaction.followup.send(f"Could not save a clip: {exc}", ephemeral=True)
