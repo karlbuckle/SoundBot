@@ -107,6 +107,8 @@ cannot receive it, so this uses
 which replaces discord.py with a fork. It is off by default.
 
 1. Set `ENABLE_RECORDING=true` in `.env` and rerun `bash deploy.sh` to rebuild.
+   If you run the published image instead of building it, use
+   `ghcr.io/karlbuckle/soundbot:recording` in place of `:latest`.
 2. Open **Clips**, choose a server and voice channel, and click
    **Start recording**. The bot joins and stays in that channel, and rejoins
    after restarts and dropped connections until recording is stopped.

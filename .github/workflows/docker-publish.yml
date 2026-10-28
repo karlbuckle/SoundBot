@@ -13,6 +13,18 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Two images: "latest" uses stock discord.py; "recording" is built with
+    # ENABLE_RECORDING=true (the experimental voice-receive fork).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: latest
+            suffix: ""
+            enable_recording: "false"
+          - tag: recording
+            suffix: "-recording"
+            enable_recording: "true"
 
     steps:
       - name: Check out repository
@@ -34,8 +46,10 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
+          build-args: |
+            ENABLE_RECORDING=${{ matrix.enable_recording }}
           tags: |
-            ghcr.io/karlbuckle/soundbot:latest
-            ghcr.io/karlbuckle/soundbot:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ghcr.io/karlbuckle/soundbot:${{ matrix.tag }}
+            ghcr.io/karlbuckle/soundbot:${{ github.sha }}${{ matrix.suffix }}
+          cache-from: type=gha,scope=${{ matrix.tag }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
