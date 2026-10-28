@@ -3,9 +3,12 @@ setlocal
 cd /d "%~dp0"
 
 set "PYTHON=.tools\python\cpython-3.12-windows-x86_64-none\python.exe"
+if not exist "%PYTHON%" set "PYTHON=.venv\Scripts\python.exe"
 if not exist "%PYTHON%" (
-    echo Portable Python is missing.
-    echo Ask Codex to set up the admin-free local test environment first.
+    echo Python is missing.
+    echo Create a virtual environment first:
+    echo   python -m venv .venv
+    echo   .venv\Scripts\python -m pip install -r requirements-dev.txt
     exit /b 1
 )
 

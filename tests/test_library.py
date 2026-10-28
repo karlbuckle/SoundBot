@@ -30,6 +30,26 @@ def test_get_only_returns_scanned_audio(tmp_path: Path) -> None:
     assert library.get("../../etc/passwd") is None
 
 
+def test_uses_cached_scan_until_refreshed(tmp_path: Path) -> None:
+    (tmp_path / "first.mp3").touch()
+    library = AudioLibrary((tmp_path,))
+    assert [sound.name for sound in library.all()] == ["first"]
+
+    (tmp_path / "second.mp3").touch()
+
+    assert [sound.name for sound in library.all()] == ["first"]
+    assert [sound.name for sound in library.all(refresh=True)] == ["first", "second"]
+
+
+def test_get_finds_files_added_after_the_last_scan(tmp_path: Path) -> None:
+    library = AudioLibrary((tmp_path,))
+    assert library.all() == []
+    (tmp_path / "late.mp3").touch()
+    late_id = AudioLibrary((tmp_path,)).all()[0].id
+
+    assert library.get(late_id) is not None
+
+
 def test_scans_subfolders_with_relative_paths_for_browsing(tmp_path: Path) -> None:
     library_root = tmp_path / "soundboard"
     nested = library_root / "memes" / "classic"

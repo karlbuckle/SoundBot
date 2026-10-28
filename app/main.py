@@ -17,13 +17,15 @@ from pydantic import BaseModel, Field
 from app.bot import SoundboardBot
 from app.config import Settings
 from app.library import AudioLibrary
+from app.preferences import MAX_VOLUME, GuildPreferences
 from app.stats import UsageStats
 
 
 settings = Settings.from_env()
 library = AudioLibrary(settings.audio_directories)
 stats = UsageStats(settings.stats_database)
-bot = SoundboardBot(library, stats)
+preferences = GuildPreferences(settings.stats_database)
+bot = SoundboardBot(library, stats, preferences)
 static_dir = Path(__file__).parent / "static"
 
 
@@ -79,6 +81,11 @@ class VolumeRequest(BaseModel):
 class NormalizeRequest(BaseModel):
     guild_id: int
     normalize: bool
+
+
+class DefaultsRequest(BaseModel):
+    volume: float | None = Field(default=None, ge=0.0, le=MAX_VOLUME)
+    normalize: bool | None = None
 
 
 class SeekRequest(BaseModel):
@@ -138,8 +145,10 @@ async def health() -> dict[str, object]:
 
 
 @app.get("/api/sounds", dependencies=[Depends(require_api_token)])
-async def sounds() -> list[dict[str, str]]:
-    return [sound.public_dict() for sound in library.all()]
+async def sounds(refresh: bool = False) -> list[dict[str, object]]:
+    plays = stats.play_counts()
+    items = await asyncio.to_thread(library.all, refresh)
+    return [{**sound.public_dict(), "plays": plays.get(sound.id, 0)} for sound in items]
 
 
 @app.get("/api/system", dependencies=[Depends(require_api_token)])
@@ -185,9 +194,17 @@ async def guilds() -> list[dict[str, object]]:
                 for channel in guild.voice_channels
             ],
             "status": bot.playback.status(guild.id),
+            "defaults": preferences.get(guild.id).public_dict(),
         }
         for guild in bot.guilds
     ]
+
+
+@app.post("/api/discord/guilds/{guild_id}/defaults", dependencies=[Depends(require_api_token)])
+async def update_guild_defaults(guild_id: int, request: DefaultsRequest) -> dict[str, float | bool]:
+    if bot.get_guild(guild_id) is None:
+        raise HTTPException(status_code=404, detail="The bot is not connected to that Discord server.")
+    return preferences.update(guild_id, volume=request.volume, normalize=request.normalize).public_dict()
 
 
 @app.post("/api/play/sound", dependencies=[Depends(require_api_token)])

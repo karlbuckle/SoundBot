@@ -8,6 +8,10 @@ who do not have access to the website.
 
 - Separate **Sounds** and **YouTube** pages in the web UI
 - Sounds page auto-detects collections and nested subfolders for browsing
+- Sort sounds by name, play count or date added; group by folder or show one
+  flat list; star favourites to pin them to the top (saved per browser)
+- Volume and Normalize controls in the top bar apply to the next sound and to
+  whatever is playing; volume changes take effect instantly
 - Recursive scanning of multiple audio directories
 - Discord server and voice-channel selection in the UI
 - Discord slash commands with sound-name autocomplete
@@ -68,15 +72,25 @@ Then list the paths *inside the container* in `.env`:
 AUDIO_DIRECTORIES=/media/sounds,/media/memes,/media/intros
 ```
 
-Supported formats are AAC, FLAC, M4A, MP3, OGG, Opus, WAV, and WebM. Changes
-appear whenever the library is refreshed; a container restart is not required.
+Supported formats are AAC, FLAC, M4A, MP3, OGG, Opus, WAV, and WebM. New files
+appear within a minute, or straight away after Refresh library; a container
+restart is not required.
 
 ## Discord commands
 
 - `/soundboard play` — choose and play a library sound
 - `/soundboard youtube` — play a YouTube URL
+- `/soundboard settings` — show or change this server's default volume and
+  normalize (changing them requires the Manage Server permission)
 - `/soundboard stop` — stop playback
 - `/soundboard leave` — disconnect the bot from voice
+
+`play` and `youtube` accept optional `volume` (0–300%) and `normalize`
+options. Anything left out uses the server defaults, which can also be set on
+the web UI's Settings page.
+
+The library is cached and rescanned at most once a minute, or immediately when
+**Refresh library** is clicked.
 
 The user issuing `play` or `youtube` must already be in a voice channel. Starting
 a new item replaces the currently playing item for that server.

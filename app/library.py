@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -24,17 +25,20 @@ class Sound:
     collection: str
     relative_path: str
     path: Path
+    modified_at: float = 0.0
 
-    def public_dict(self) -> dict[str, str]:
+    def public_dict(self) -> dict[str, str | float]:
         data = asdict(self)
         data.pop("path")
         return data
 
 
 class AudioLibrary:
-    def __init__(self, directories: tuple[Path, ...]):
+    def __init__(self, directories: tuple[Path, ...], max_age_seconds: float = 60.0):
         self.directories = directories
+        self.max_age_seconds = max_age_seconds
         self._sounds: dict[str, Sound] = {}
+        self._scanned_at: float | None = None
 
     def scan(self) -> list[Sound]:
         sounds: dict[str, Sound] = {}
@@ -57,20 +61,31 @@ class AudioLibrary:
                     collection=collection,
                     relative_path=relative,
                     path=resolved,
+                    modified_at=resolved.stat().st_mtime,
                 )
         self._sounds = sounds
+        self._scanned_at = time.monotonic()
         return list(sounds.values())
 
-    def all(self) -> list[Sound]:
-        return self.scan()
+    def all(self, refresh: bool = False) -> list[Sound]:
+        """Return the cached library, rescanning when asked or when it is stale."""
+        stale = self._scanned_at is None or time.monotonic() - self._scanned_at > self.max_age_seconds
+        if refresh or stale:
+            return self.scan()
+        return list(self._sounds.values())
 
     def get(self, sound_id: str) -> Sound | None:
-        self.scan()
-        return self._sounds.get(sound_id)
+        self.all()
+        sound = self._sounds.get(sound_id)
+        if sound is None or not sound.path.is_file():
+            # The file may have been added, moved or deleted since the last scan.
+            self.scan()
+            sound = self._sounds.get(sound_id)
+        return sound
 
     def search(self, query: str, limit: int = 25) -> list[Sound]:
         query = query.casefold().strip()
-        sounds = self.scan()
+        sounds = self.all()
         if not query:
             return sounds[:limit]
         return [
