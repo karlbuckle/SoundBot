@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -54,6 +54,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Discord Soundboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+@app.middleware("http")
+async def revalidate_page_files(request: Request, call_next):
+    # Without this, browsers may keep using an old app.js after an update while
+    # loading the new page, which breaks newer features until a hard refresh.
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def require_api_token(x_api_key: str | None = Header(default=None)) -> None:

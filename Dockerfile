@@ -4,9 +4,12 @@ FROM python:3.12-slim
 # swaps stock discord.py for an experimental fork that can receive voice.
 ARG ENABLE_RECORDING=false
 
+# Keep stats and clips in /data so a mounted volume preserves them.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    ENABLE_RECORDING=${ENABLE_RECORDING}
+    ENABLE_RECORDING=${ENABLE_RECORDING} \
+    STATS_DATABASE=/data/stats.db \
+    CLIPS_DIRECTORY=/data/clips
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ffmpeg nodejs \
