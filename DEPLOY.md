@@ -59,6 +59,22 @@ bash deploy.sh
 
 Compose rebuilds only changed layers and retains the database and `.env`.
 
+## Voice recording (optional)
+
+To enable the experimental "save the last minute" feature, add this line to
+`.env` and rerun the deploy script:
+
+```bash
+echo "ENABLE_RECORDING=true" >> .env
+bash deploy.sh
+```
+
+The build then installs Git and a discord.py fork that can receive voice, so
+it needs network access to GitHub. Saved clips live in the same Docker volume
+as the database, under `/data/clips`. If the bot misbehaves with recording
+enabled, change the line to `ENABLE_RECORDING=false` and rerun
+`bash deploy.sh` to return to stock discord.py.
+
 ## Audio and backups
 
 Put audio files in `~/soundboard/sounds`; the container sees changes without a

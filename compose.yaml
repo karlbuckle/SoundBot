@@ -1,6 +1,9 @@
 services:
   soundboard:
-    build: .
+    build:
+      context: .
+      args:
+        ENABLE_RECORDING: ${ENABLE_RECORDING:-false}
     container_name: discord-soundboard
     restart: unless-stopped
     init: true
@@ -8,6 +11,7 @@ services:
       - .env
     environment:
       STATS_DATABASE: /data/stats.db
+      CLIPS_DIRECTORY: /data/clips
     ports:
       - "${SOUNDBOARD_PORT:-8000}:8000"
     volumes:

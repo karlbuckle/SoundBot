@@ -15,6 +15,22 @@ def test_defaults_until_a_server_saves_its_own(tmp_path: Path) -> None:
     assert preferences.get(2) == PlaybackDefaults()
 
 
+def test_recording_channels_and_speaker_gains(tmp_path: Path) -> None:
+    preferences = GuildPreferences(tmp_path / "stats.db")
+    assert preferences.recording_channels() == {}
+
+    preferences.set_recording_channel(1, 10)
+    preferences.set_recording_channel(1, 11)
+    preferences.set_recording_channel(2, 20)
+    preferences.set_recording_channel(2, None)
+    assert preferences.recording_channels() == {1: 11}
+
+    assert preferences.set_recording_gain(1, "123", 1.5) == 1.5
+    assert preferences.set_recording_gain(1, "soundboard", 99) == 4.0
+    assert preferences.recording_gains(1) == {"123": 1.5, "soundboard": 4.0}
+    assert preferences.recording_gains(2) == {}
+
+
 def test_volume_is_clamped(tmp_path: Path) -> None:
     preferences = GuildPreferences(tmp_path / "stats.db")
 

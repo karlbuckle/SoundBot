@@ -15,9 +15,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.bot import SoundboardBot
+from app.clips import ClipStore
 from app.config import Settings
 from app.library import AudioLibrary
-from app.preferences import MAX_VOLUME, GuildPreferences
+from app.preferences import MAX_SPEAKER_GAIN, MAX_VOLUME, GuildPreferences
 from app.stats import UsageStats
 
 
@@ -25,7 +26,15 @@ settings = Settings.from_env()
 library = AudioLibrary(settings.audio_directories)
 stats = UsageStats(settings.stats_database)
 preferences = GuildPreferences(settings.stats_database)
-bot = SoundboardBot(library, stats, preferences)
+clips = ClipStore(settings.clips_directory)
+bot = SoundboardBot(
+    library,
+    stats,
+    preferences,
+    clips,
+    enable_recording=settings.enable_recording,
+    recording_seconds=settings.recording_seconds,
+)
 static_dir = Path(__file__).parent / "static"
 
 
@@ -88,6 +97,17 @@ class DefaultsRequest(BaseModel):
     normalize: bool | None = None
 
 
+class RecordingStartRequest(BaseModel):
+    guild_id: int
+    channel_id: int
+
+
+class SpeakerGainRequest(BaseModel):
+    guild_id: int
+    speaker_key: str = Field(min_length=1, max_length=40)
+    gain: float = Field(ge=0.0, le=MAX_SPEAKER_GAIN)
+
+
 class SeekRequest(BaseModel):
     guild_id: int
     position_seconds: float = Field(ge=0.0)
@@ -140,6 +160,7 @@ async def health() -> dict[str, object]:
     return {
         "status": "ok",
         "discord_ready": bot.is_ready(),
+        "recording_available": bot.recording.available,
         "configured_directories": [str(path) for path in settings.audio_directories],
     }
 
@@ -174,8 +195,21 @@ async def system_status() -> dict[str, object]:
             "status": "available",
             "detail": str(settings.stats_database),
         },
+        {
+            "name": "Voice recording",
+            "version": _package_version("discord-ext-voice-recv"),
+            "status": "available" if bot.recording.available else "offline",
+            "detail": str(settings.clips_directory) if bot.recording.available else bot.recording.unavailable_reason,
+        },
     ]
     return {"components": components, "packages": package_versions(), "directories": directories}
+
+
+def _package_version(package: str) -> str:
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return "Not installed"
 
 
 @app.get("/api/stats", dependencies=[Depends(require_api_token)])
@@ -282,7 +316,59 @@ async def stop(request: GuildRequest) -> dict[str, bool]:
 
 @app.post("/api/play/leave", dependencies=[Depends(require_api_token)])
 async def leave(request: GuildRequest) -> dict[str, bool]:
-    return {"disconnected": await bot.playback.leave(request.guild_id)}
+    return {"disconnected": await bot.leave_voice(request.guild_id)}
+
+
+@app.get("/api/recording/{guild_id}", dependencies=[Depends(require_api_token)])
+async def recording_status(guild_id: int) -> dict[str, object]:
+    return bot.recording.status(guild_id)
+
+
+@app.post("/api/recording/start", dependencies=[Depends(require_api_token)])
+async def start_recording(request: RecordingStartRequest) -> dict[str, object]:
+    try:
+        return await bot.recording.start(request.guild_id, request.channel_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/recording/stop", dependencies=[Depends(require_api_token)])
+async def stop_recording(request: GuildRequest) -> dict[str, object]:
+    return await bot.recording.stop(request.guild_id)
+
+
+@app.post("/api/recording/save", dependencies=[Depends(require_api_token)])
+async def save_recording(request: GuildRequest) -> dict[str, object]:
+    try:
+        return await bot.recording.save_clip(request.guild_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/recording/gain", dependencies=[Depends(require_api_token)])
+async def set_speaker_gain(request: SpeakerGainRequest) -> dict[str, object]:
+    preferences.set_recording_gain(request.guild_id, request.speaker_key, request.gain)
+    return bot.recording.status(request.guild_id)
+
+
+@app.get("/api/clips", dependencies=[Depends(require_api_token)])
+async def list_clips() -> list[dict[str, object]]:
+    return clips.list()
+
+
+@app.get("/api/clips/{name}", dependencies=[Depends(require_api_token)])
+async def get_clip(name: str) -> FileResponse:
+    path = clips.path(name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    return FileResponse(path, filename=path.name)
+
+
+@app.delete("/api/clips/{name}", dependencies=[Depends(require_api_token)])
+async def delete_clip(name: str) -> dict[str, bool]:
+    if not clips.delete(name):
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    return {"deleted": True}
 
 
 @app.get("/api/play/status/{guild_id}", dependencies=[Depends(require_api_token)])
