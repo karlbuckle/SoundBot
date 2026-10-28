@@ -3,6 +3,8 @@ const state = {
   sounds: [],
   soundFilters: { collection: "", folder: "" },
   seeking: false,
+  favourites: new Set(),
+  adjustingVolume: false,
   applyingPlaybackControl: false,
 };
 const elements = {
@@ -10,6 +12,7 @@ const elements = {
   channel: document.querySelector("#channel-select"),
   grid: document.querySelector("#sound-grid"),
   soundSearch: document.querySelector("#sound-search"),
+  soundSort: document.querySelector("#sound-sort"),
   summary: document.querySelector("#sound-summary"),
   soundOverview: document.querySelector("#sound-overview"),
   collectionFilters: document.querySelector("#collection-filters"),
@@ -22,10 +25,41 @@ const elements = {
   volumeSlider: document.querySelector("#volume-slider"),
   volumeLabel: document.querySelector("#volume-label"),
   normalizeToggle: document.querySelector("#normalize-toggle"),
+  groupToggle: document.querySelector("#group-toggle"),
+  defaultsServer: document.querySelector("#defaults-server"),
+  defaultsVolume: document.querySelector("#defaults-volume"),
+  defaultsVolumeLabel: document.querySelector("#defaults-volume-label"),
+  defaultsNormalize: document.querySelector("#defaults-normalize"),
+  saveDefaults: document.querySelector("#save-defaults"),
 };
 let playbackPoller = null;
 
+const soundSorters = {
+  "name-asc": (left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }),
+  "name-desc": (left, right) => right.name.localeCompare(left.name, undefined, { numeric: true }),
+  "plays-desc": (left, right) => (right.plays || 0) - (left.plays || 0) || soundSorters["name-asc"](left, right),
+  newest: (left, right) => (right.modified_at || 0) - (left.modified_at || 0) || soundSorters["name-asc"](left, right),
+  oldest: (left, right) => (left.modified_at || 0) - (right.modified_at || 0) || soundSorters["name-asc"](left, right),
+};
+
 function apiKey() { return sessionStorage.getItem("soundboardApiKey") || ""; }
+
+// Volume, normalize and sort are per-browser preferences that survive reloads.
+function loadPreferences() {
+  const volume = Number(localStorage.getItem("soundboardVolume"));
+  if (localStorage.getItem("soundboardVolume") !== null && Number.isFinite(volume)) {
+    elements.volumeSlider.value = String(Math.min(Math.max(volume, 0), 3));
+  }
+  elements.volumeLabel.textContent = `Volume ${Math.round(Number(elements.volumeSlider.value) * 100)}%`;
+  elements.normalizeToggle.checked = localStorage.getItem("soundboardNormalize") === "true";
+  const sort = localStorage.getItem("soundboardSort");
+  if (sort in soundSorters) elements.soundSort.value = sort;
+  elements.groupToggle.checked = localStorage.getItem("soundboardGroupByFolder") !== "false";
+  try {
+    const favourites = JSON.parse(localStorage.getItem("soundboardFavourites") || "[]");
+    if (Array.isArray(favourites)) state.favourites = new Set(favourites);
+  } catch (_error) { /* ignore a corrupted favourites list */ }
+}
 
 function clientIdentity() {
   let id = localStorage.getItem("soundboardClientId");
@@ -79,6 +113,7 @@ function updateChannels() {
   if (guild?.channels.length === 1) elements.channel.value = guild.channels[0].id;
   if (guild?.status) renderNowPlaying(guild.status);
   else elements.nowPlaying.hidden = true;
+  renderDefaults();
 }
 
 function formatClock(seconds) {
@@ -97,10 +132,13 @@ function playbackOptions() {
 
 function renderNowPlaying(status) {
   elements.nowTitle.textContent = status.title;
-  const volume = Number.isFinite(status.volume) ? Math.max(0, status.volume) : 1;
-  elements.volumeSlider.value = volume.toFixed(2);
-  elements.volumeLabel.textContent = `Volume ${Math.round(volume * 100)}%`;
-  elements.normalizeToggle.checked = Boolean(status.normalize);
+  // Don't snap the volume slider back while the user is dragging it.
+  if (!state.adjustingVolume) {
+    const volume = Number.isFinite(status.volume) ? Math.max(0, status.volume) : 1;
+    elements.volumeSlider.value = volume.toFixed(2);
+    elements.volumeLabel.textContent = `Volume ${Math.round(volume * 100)}%`;
+  }
+  if (!state.applyingPlaybackControl) elements.normalizeToggle.checked = Boolean(status.normalize);
   const duration = Number.isFinite(status.duration_seconds) ? status.duration_seconds : 0;
   const position = Number.isFinite(status.position_seconds) ? status.position_seconds : 0;
   elements.seekSlider.disabled = !status.can_seek;
@@ -238,6 +276,14 @@ function renderSounds() {
     elements.grid.append(empty);
     return;
   }
+  const favourites = filtered.filter((sound) => state.favourites.has(sound.id));
+  if (favourites.length) {
+    elements.grid.append(soundSection("★ Favourites", `${countLabel(favourites.length, "sound")} · saved in this browser`, favourites, "favourites"));
+  }
+  if (!elements.groupToggle.checked) {
+    elements.grid.append(soundSection("All sounds", countLabel(filtered.length, "sound"), filtered));
+    return;
+  }
   const groups = new Map();
   filtered.forEach((sound) => {
     const token = folderToken(sound);
@@ -246,41 +292,76 @@ function renderSounds() {
   });
   [...groups.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .forEach(([token, sounds]) => {
-      const section = document.createElement("section");
-      section.className = "sound-group";
-      const heading = document.createElement("div");
-      heading.className = "sound-group-heading";
-      const titleWrap = document.createElement("div");
-      const title = document.createElement("h2");
-      title.textContent = displayFolder(folderKey(sounds[0]));
-      const detail = document.createElement("small");
-      detail.textContent = `${sounds[0].collection} · ${sounds.length} sound${sounds.length === 1 ? "" : "s"}`;
-      titleWrap.append(title, detail);
-      heading.append(titleWrap);
-      section.append(heading);
-      const groupGrid = document.createElement("div");
-      groupGrid.className = "sound-grid";
-      sounds.forEach((sound) => {
-        const button = document.createElement("button");
-        button.className = "sound-card";
-        const icon = document.createElement("span");
-        icon.className = "play-symbol";
-        icon.textContent = "▶";
-        const cardTitle = document.createElement("strong");
-        cardTitle.textContent = sound.name;
-        const collection = document.createElement("small");
-        collection.textContent = sound.collection;
-        const location = document.createElement("span");
-        location.className = "sound-path";
-        location.textContent = sound.relative_path;
-        button.append(icon, cardTitle, collection, location);
-        button.addEventListener("click", () => playSound(sound));
-        groupGrid.append(button);
-      });
-      section.append(groupGrid);
-      elements.grid.append(section);
+    .forEach(([_token, sounds]) => {
+      elements.grid.append(soundSection(
+        displayFolder(folderKey(sounds[0])),
+        `${sounds[0].collection} · ${countLabel(sounds.length, "sound")}`,
+        sounds,
+      ));
     });
+}
+
+function countLabel(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function soundSection(titleText, detailText, sounds, variant = "") {
+  const section = document.createElement("section");
+  section.className = `sound-group${variant ? ` ${variant}` : ""}`;
+  const heading = document.createElement("div");
+  heading.className = "sound-group-heading";
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("h2");
+  title.textContent = titleText;
+  const detail = document.createElement("small");
+  detail.textContent = detailText;
+  titleWrap.append(title, detail);
+  heading.append(titleWrap);
+  section.append(heading);
+  const groupGrid = document.createElement("div");
+  groupGrid.className = "sound-grid";
+  [...sounds]
+    .sort(soundSorters[elements.soundSort.value] || soundSorters["name-asc"])
+    .forEach((sound) => groupGrid.append(soundCard(sound)));
+  section.append(groupGrid);
+  return section;
+}
+
+function soundCard(sound) {
+  const wrap = document.createElement("div");
+  wrap.className = "sound-card-wrap";
+  const button = document.createElement("button");
+  button.className = "sound-card";
+  const icon = document.createElement("span");
+  icon.className = "play-symbol";
+  icon.textContent = "▶";
+  const cardTitle = document.createElement("strong");
+  cardTitle.textContent = sound.name;
+  const collection = document.createElement("small");
+  collection.textContent = `${sound.collection} · ${countLabel(sound.plays || 0, "play")}`;
+  const location = document.createElement("span");
+  location.className = "sound-path";
+  location.textContent = sound.relative_path;
+  button.append(icon, cardTitle, collection, location);
+  button.addEventListener("click", () => playSound(sound));
+  const isFavourite = state.favourites.has(sound.id);
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = `favourite-button${isFavourite ? " active" : ""}`;
+  star.textContent = isFavourite ? "★" : "☆";
+  star.title = isFavourite ? "Remove from favourites" : "Add to favourites";
+  star.setAttribute("aria-label", `${star.title}: ${sound.name}`);
+  star.setAttribute("aria-pressed", String(isFavourite));
+  star.addEventListener("click", () => toggleFavourite(sound));
+  wrap.append(button, star);
+  return wrap;
+}
+
+function toggleFavourite(sound) {
+  if (state.favourites.has(sound.id)) state.favourites.delete(sound.id);
+  else state.favourites.add(sound.id);
+  localStorage.setItem("soundboardFavourites", JSON.stringify([...state.favourites]));
+  renderSounds();
 }
 
 function refreshSounds(data) {
@@ -301,8 +382,32 @@ async function playSound(sound) {
     });
     renderNowPlaying(result);
     startPlaybackPolling();
+    // Count the play locally; the order updates on the next render so cards
+    // don't jump around under the cursor.
+    sound.plays = (sound.plays || 0) + 1;
     notify(`Playing ${result.title}`);
   } catch (error) { notify(error.message, true); }
+}
+
+async function refreshPlaybackStatus() {
+  const guildId = elements.guild.value;
+  if (!guildId) return;
+  try {
+    const status = await api(`/api/play/status/${guildId}`);
+    if (status) renderNowPlaying(status);
+    else elements.nowPlaying.hidden = true;
+  } catch (_error) { /* polling is best effort */ }
+}
+
+// Poll every second while something plays, every few seconds when idle (to
+// notice Discord-triggered playback), and not at all while the tab is hidden.
+async function startPlaybackPolling() {
+  clearTimeout(playbackPoller);
+  await refreshPlaybackStatus();
+  clearTimeout(playbackPoller);
+  if (!document.hidden) {
+    playbackPoller = setTimeout(startPlaybackPolling, elements.nowPlaying.hidden ? 5000 : 1000);
+  }
 }
 
 function statusPill(status) {
@@ -387,16 +492,35 @@ async function loadStats() {
   } catch (error) { notify(error.message, true); }
 }
 
-async function load() {
+function renderDefaults() {
+  const guild = state.guilds.find((item) => item.id === elements.guild.value);
+  const defaults = guild?.defaults || { volume: 1, normalize: false };
+  elements.defaultsServer.textContent = guild ? guild.name : "Choose a server in the top bar first.";
+  [elements.defaultsVolume, elements.defaultsNormalize, elements.saveDefaults].forEach((control) => {
+    control.disabled = !guild;
+  });
+  elements.defaultsVolume.value = String(defaults.volume);
+  elements.defaultsVolumeLabel.textContent = `Volume ${Math.round(defaults.volume * 100)}%`;
+  elements.defaultsNormalize.checked = Boolean(defaults.normalize);
+}
+
+async function load(refreshLibrary = false) {
   try {
     const [health, guilds, sounds] = await Promise.all([
-      api("/api/health"), api("/api/discord/guilds"), api("/api/sounds"),
+      api("/api/health"), api("/api/discord/guilds"), api(`/api/sounds${refreshLibrary ? "?refresh=true" : ""}`),
     ]);
     state.guilds = guilds;
     refreshSounds(sounds);
+    // Keep the chosen server and channel when reloading.
+    const previousGuild = elements.guild.value;
+    const previousChannel = elements.channel.value;
     setOptions(elements.guild, guilds, "Choose server");
-    if (guilds.length === 1) elements.guild.value = guilds[0].id;
+    if (guilds.some((guild) => guild.id === previousGuild)) elements.guild.value = previousGuild;
+    else if (guilds.length === 1) elements.guild.value = guilds[0].id;
     updateChannels();
+    if ([...elements.channel.options].some((option) => option.value && option.value === previousChannel)) {
+      elements.channel.value = previousChannel;
+    }
     startPlaybackPolling();
     document.querySelector("#status-dot").classList.toggle("online", health.discord_ready);
     document.querySelector("#connection-title").textContent = health.discord_ready ? "Discord online" : "Discord offline";
@@ -404,22 +528,6 @@ async function load() {
   } catch (error) {
     notify(error.message, true);
     if (error.message.toLowerCase().includes("api key")) setApiKey();
-  }
-
-  async function refreshPlaybackStatus() {
-    const guildId = elements.guild.value;
-    if (!guildId) return;
-    try {
-      const status = await api(`/api/play/status/${guildId}`);
-      if (status) renderNowPlaying(status);
-      else elements.nowPlaying.hidden = true;
-    } catch (_error) { /* polling is best effort */ }
-  }
-
-  function startPlaybackPolling() {
-    clearInterval(playbackPoller);
-    playbackPoller = setInterval(refreshPlaybackStatus, 1000);
-    refreshPlaybackStatus();
   }
 }
 
@@ -439,9 +547,39 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   if (button.dataset.page === "stats") loadStats();
 }));
 
-elements.guild.addEventListener("change", updateChannels);
+elements.guild.addEventListener("change", () => {
+  updateChannels();
+  startPlaybackPolling();
+});
 elements.soundSearch.addEventListener("input", renderSounds);
-document.querySelector("#refresh-sounds").addEventListener("click", load);
+elements.soundSort.addEventListener("change", () => {
+  localStorage.setItem("soundboardSort", elements.soundSort.value);
+  renderSounds();
+});
+elements.groupToggle.addEventListener("change", () => {
+  localStorage.setItem("soundboardGroupByFolder", String(elements.groupToggle.checked));
+  renderSounds();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearTimeout(playbackPoller);
+  else startPlaybackPolling();
+});
+elements.defaultsVolume.addEventListener("input", () => {
+  elements.defaultsVolumeLabel.textContent = `Volume ${Math.round(Number(elements.defaultsVolume.value) * 100)}%`;
+});
+elements.saveDefaults.addEventListener("click", async () => {
+  const guild = state.guilds.find((item) => item.id === elements.guild.value);
+  if (!guild) return notify("Choose a Discord server first.", true);
+  try {
+    guild.defaults = await api(`/api/discord/guilds/${guild.id}/defaults`, {
+      method: "POST",
+      body: JSON.stringify({ volume: Number(elements.defaultsVolume.value), normalize: elements.defaultsNormalize.checked }),
+    });
+    renderDefaults();
+    notify(`Discord defaults saved for ${guild.name}`);
+  } catch (error) { notify(error.message, true); }
+});
+document.querySelector("#refresh-sounds").addEventListener("click", () => load(true));
 document.querySelector("#settings-button").addEventListener("click", setApiKey);
 document.querySelector("#refresh-components").addEventListener("click", loadComponents);
 document.querySelector("#refresh-stats").addEventListener("click", loadStats);
@@ -471,7 +609,6 @@ document.querySelector("#stop-button").addEventListener("click", async () => {
     const { guild_id } = destination();
     await api("/api/play/stop", { method: "POST", body: JSON.stringify({ guild_id }) });
     elements.nowPlaying.hidden = true;
-    clearInterval(playbackPoller);
     notify("Playback stopped");
   } catch (error) { notify(error.message, true); }
 });
@@ -480,17 +617,20 @@ document.querySelector("#leave-button").addEventListener("click", async () => {
     const { guild_id } = destination();
     await api("/api/play/leave", { method: "POST", body: JSON.stringify({ guild_id }) });
     elements.nowPlaying.hidden = true;
-    clearInterval(playbackPoller);
     notify("Disconnected from voice");
   } catch (error) { notify(error.message, true); }
 });
 elements.volumeSlider.addEventListener("input", () => {
+  state.adjustingVolume = true;
   const volume = Number(elements.volumeSlider.value);
   elements.volumeLabel.textContent = `Volume ${Math.round(volume * 100)}%`;
 });
 elements.volumeSlider.addEventListener("change", async () => {
-  if (elements.nowPlaying.hidden) return;
-  if (state.applyingPlaybackControl) return;
+  localStorage.setItem("soundboardVolume", elements.volumeSlider.value);
+  if (elements.nowPlaying.hidden || state.applyingPlaybackControl) {
+    state.adjustingVolume = false;
+    return;
+  }
   state.applyingPlaybackControl = true;
   try {
     const result = await api("/api/play/volume", {
@@ -499,9 +639,16 @@ elements.volumeSlider.addEventListener("change", async () => {
     });
     renderNowPlaying(result);
   } catch (error) { notify(error.message, true); }
+  state.adjustingVolume = false;
   state.applyingPlaybackControl = false;
 });
 elements.normalizeToggle.addEventListener("change", async () => {
+  localStorage.setItem("soundboardNormalize", String(elements.normalizeToggle.checked));
+  // With nothing playing, the setting just applies to the next sound.
+  if (elements.nowPlaying.hidden) {
+    notify(`Normalize ${elements.normalizeToggle.checked ? "on" : "off"} for the next sound`);
+    return;
+  }
   if (state.applyingPlaybackControl) return;
   state.applyingPlaybackControl = true;
   try {
@@ -535,5 +682,6 @@ elements.seekSlider.addEventListener("change", async () => {
 });
 
 const route = location.hash.slice(1);
-if (["sounds", "youtube", "components", "features", "stats"].includes(route)) document.querySelector(`[data-page="${route}"]`).click();
+if (["sounds", "youtube", "components", "features", "stats", "settings"].includes(route)) document.querySelector(`[data-page="${route}"]`).click();
+loadPreferences();
 load();

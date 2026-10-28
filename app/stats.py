@@ -63,6 +63,14 @@ class UsageStats:
                 ),
             )
 
+    def play_counts(self, kind: str = "sound") -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT item_id, COUNT(*) AS plays FROM usage_events WHERE kind = ? GROUP BY item_id",
+                (kind,),
+            ).fetchall()
+        return {row["item_id"]: row["plays"] for row in rows}
+
     def summary(self, limit: int = 10) -> dict[str, object]:
         with self._connect() as connection:
             totals = connection.execute(

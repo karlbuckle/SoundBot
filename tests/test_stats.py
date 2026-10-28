@@ -36,3 +36,5 @@ def test_records_and_summarises_usage(tmp_path: Path) -> None:
     assert report["top_sounds"][0]["title"] == "airhorn"
     assert report["top_sounds"][0]["plays"] == 2
     assert {item["source"] for item in report["methods"]} == {"Discord command", "Web UI"}
+    assert stats.play_counts() == {"airhorn-id": 2}
+    assert stats.play_counts("youtube") == {}

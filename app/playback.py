@@ -77,17 +77,18 @@ class PlaybackService:
             return None
 
     @staticmethod
-    def _build_source(state: PlaybackState) -> discord.AudioSource:
+    def _build_source(state: PlaybackState) -> discord.PCMVolumeTransformer:
         before_options = state.before_options.strip()
         if state.offset_seconds > 0:
             before_options = f"{before_options} -ss {state.offset_seconds:.3f}".strip()
-        filters = [f"volume={max(0.0, state.volume):.3f}"]
+        options = "-vn"
         if state.normalize:
-            filters.insert(0, "loudnorm=I=-16:LRA=11:TP=-1.5")
-        options = f'-vn -af "{",".join(filters)}"'
-        return discord.FFmpegPCMAudio(
+            options += ' -af "loudnorm=I=-16:LRA=11:TP=-1.5"'
+        audio = discord.FFmpegPCMAudio(
             state.input_source, before_options=before_options or None, options=options
         )
+        # Volume is applied in Python so it can change without restarting FFmpeg.
+        return discord.PCMVolumeTransformer(audio, volume=max(0.0, state.volume))
 
     def _current_position(self, state: PlaybackState, *, paused: bool) -> float:
         elapsed = 0.0 if paused else max(0.0, time.monotonic() - state.started_monotonic)
@@ -141,7 +142,8 @@ class PlaybackService:
             source=path.name,
             channel_id=channel_id,
             input_source=str(path),
-            duration_seconds=self._probe_file_duration(path),
+            # ffprobe can take seconds; keep it off the event loop.
+            duration_seconds=await asyncio.to_thread(self._probe_file_duration, path),
             volume=volume,
             normalize=normalize,
         )
@@ -181,6 +183,11 @@ class PlaybackService:
             raise ValueError("Nothing is playing.")
         guild = self.bot.get_guild(guild_id)
         voice = guild.voice_client if guild else None
+        source = voice.source if voice else None
+        if isinstance(source, discord.PCMVolumeTransformer):
+            source.volume = volume
+            state.volume = volume
+            return state
         state.offset_seconds = self._current_position(state, paused=bool(voice and voice.is_paused()))
         state.volume = volume
         return await self._restart_with_current_settings(guild_id, state)
