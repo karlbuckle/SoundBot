@@ -192,6 +192,25 @@ code { color: #d8c2ff; background: #a97cf812; padding: 2px 5px; border-radius: 5
 .clip-actions .secondary-button { padding: 7px 11px; font-size: 13px; }
 .secondary-button.danger { color: #f17f8c; }
 .clip-player { display: block; width: 100%; max-width: 850px; margin-top: 16px; }
+.editor-overlay { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: #0b0a0ecc; backdrop-filter: blur(6px); }
+.editor-overlay[hidden] { display: none; }
+.editor { position: relative; width: min(920px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 24px 80px #000a; }
+.editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.editor-head .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: 11px; font-weight: 800; margin: 0; }
+.editor-head h2 { margin: 6px 0 0; font-size: 20px; overflow-wrap: anywhere; }
+.editor-wave { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); overflow: hidden; }
+.editor-wave canvas { display: block; width: 100%; height: 150px; touch-action: none; cursor: crosshair; }
+.editor-times { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.editor-times label { display: flex; align-items: center; gap: 8px; }
+.editor-times input { width: 90px; padding: 8px 10px; }
+.editor-transport { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; margin-top: 16px; }
+.editor-transport span { font-variant-numeric: tabular-nums; font-weight: 700; }
+.editor-transport small { color: var(--muted); flex: 1 1 260px; }
+.editor-subhead { margin: 24px 0 8px; font-size: 16px; }
+.editor-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.editor-actions button:disabled { opacity: .5; cursor: progress; }
+.editor-loading { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 16px; background: var(--panel); color: var(--muted); }
+.editor-loading[hidden] { display: none; }
 .clip-player[hidden] { display: none; }
 
 @media (max-width: 760px) {
@@ -224,6 +243,12 @@ code { color: #d8c2ff; background: #a97cf812; padding: 2px 5px; border-radius: 5
   .speaker-row { grid-template-columns: 1fr 48px; }
   .speaker-row input[type="range"] { grid-column: 1 / -1; grid-row: 2; }
   .clip-actions { flex-wrap: wrap; justify-content: flex-start; }
+  .editor-overlay { padding: 10px; }
+  .editor { padding: 18px; max-height: calc(100vh - 20px); }
+  .editor-times { flex-wrap: wrap; }
+  .editor-times span { order: 3; width: 100%; }
+  .editor-actions { flex-wrap: wrap; }
+  .editor-actions button { flex: 1 1 140px; }
   .defaults-controls { width: 100%; }
   .sort-control select { flex: 1; max-width: none; }
   .now-playing #leave-button { display: none; }

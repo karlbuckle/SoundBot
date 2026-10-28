@@ -60,8 +60,10 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 async def revalidate_page_files(request: Request, call_next):
     # Without this, browsers may keep using an old app.js after an update while
     # loading the new page, which breaks newer features until a hard refresh.
+    # Clip audio needs the same treatment: "Replace original" keeps the URL.
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/static/"):
+    path = request.url.path
+    if path == "/" or path.startswith(("/static/", "/api/clips/")):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -116,6 +118,13 @@ class SpeakerGainRequest(BaseModel):
     guild_id: int
     speaker_key: str = Field(min_length=1, max_length=40)
     gain: float = Field(ge=0.0, le=MAX_SPEAKER_GAIN)
+
+
+class ClipEditRequest(BaseModel):
+    start: float = Field(ge=0.0)
+    end: float = Field(gt=0.0)
+    gains: dict[str, float] = Field(default_factory=dict)
+    replace: bool = False
 
 
 class SeekRequest(BaseModel):
@@ -372,6 +381,38 @@ async def get_clip(name: str) -> FileResponse:
     if path is None:
         raise HTTPException(status_code=404, detail="Clip not found.")
     return FileResponse(path, filename=path.name)
+
+
+@app.get("/api/clips/{name}/stems", dependencies=[Depends(require_api_token)])
+async def clip_stems(name: str) -> dict[str, object]:
+    """Per-speaker tracks for the editor. Older clips have none and edit as a single track."""
+    if clips.path(name) is None:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    return clips.manifest(name) or {"speakers": []}
+
+
+@app.get("/api/clips/{name}/stems/{file}", dependencies=[Depends(require_api_token)])
+async def clip_stem(name: str, file: str) -> FileResponse:
+    path = clips.stem_path(name, file)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Track not found.")
+    return FileResponse(path)
+
+
+@app.post("/api/clips/{name}/edit", dependencies=[Depends(require_api_token)])
+async def edit_clip(name: str, request: ClipEditRequest) -> dict[str, object]:
+    try:
+        from app.clip_editor import edit_clip as render_edit
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="Clip editing needs the recording image.") from exc
+    if clips.path(name) is None:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    try:
+        return await asyncio.to_thread(
+            render_edit, clips, name, request.start, request.end, request.gains, replace=request.replace
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete("/api/clips/{name}", dependencies=[Depends(require_api_token)])

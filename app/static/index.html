@@ -190,6 +190,35 @@
           <audio id="clip-player" class="clip-player" controls hidden></audio>
         </section>
 
+        <div class="editor-overlay" id="clip-editor" hidden>
+          <div class="editor" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+            <div class="editor-head">
+              <div><p class="eyebrow">Edit clip</p><h2 id="editor-title"></h2></div>
+              <button class="icon-button" id="editor-close" aria-label="Close editor">✕</button>
+            </div>
+            <div class="editor-wave"><canvas id="editor-canvas" aria-label="Clip waveform. Drag to choose the part to keep."></canvas></div>
+            <div class="editor-times">
+              <label>Start <input id="editor-start" type="number" min="0" step="0.1"></label>
+              <span id="editor-length"></span>
+              <label>End <input id="editor-end" type="number" min="0" step="0.1"></label>
+            </div>
+            <div class="editor-transport">
+              <button class="primary-button" id="editor-play">▶ Play selection</button>
+              <span id="editor-position">0:00.0</span>
+              <small>Drag across the waveform to choose the part to keep, or drag the edges. Space plays and pauses.</small>
+            </div>
+            <h3 class="editor-subhead">Levels</h3>
+            <p class="section-note" id="editor-levels-note"></p>
+            <div id="editor-levels" class="speaker-levels"></div>
+            <div class="editor-actions">
+              <button class="secondary-button" id="editor-cancel">Cancel</button>
+              <button class="secondary-button" id="editor-replace">Replace original</button>
+              <button class="primary-button" id="editor-save">Save as new clip</button>
+            </div>
+            <div class="editor-loading" id="editor-loading">Loading clip…</div>
+          </div>
+        </div>
+
         <section class="page" id="settings-page">
           <div class="page-heading">
             <div><p class="eyebrow">Configuration</p><h1>Settings</h1><p>Server-wide defaults for sounds played with Discord commands.</p></div>
@@ -231,5 +260,6 @@
       </main>
     </div>
     <script src="/static/app.js" defer></script>
+    <script src="/static/editor.js" defer></script>
   </body>
 </html>

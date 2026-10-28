@@ -17,6 +17,7 @@ import time
 import wave
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -65,6 +66,20 @@ class _Track:
     @property
     def last_end(self) -> float | None:
         return self.chunks[-1].end if self.chunks else None
+
+
+@dataclass
+class Track:
+    """One speaker's audio, before levelling. ``auto_gain`` evens out their loudness."""
+
+    key: str
+    name: str
+    samples: np.ndarray  # mono float32 in [-1, 1] at SAMPLE_RATE
+    auto_gain: float = 1.0
+
+    @property
+    def is_soundboard(self) -> bool:
+        return self.key == SOUNDBOARD_KEY
 
 
 @dataclass(frozen=True)
@@ -116,27 +131,26 @@ class RollingRecorder:
         with self._lock:
             self._tracks.clear()
 
-    def mix(self, gains: dict[str, float] | None = None, normalize: bool = True) -> np.ndarray:
-        """Mix the buffered window into mono int16 samples ending now."""
-        gains = gains or {}
+    def tracks(self, normalize: bool = True) -> list[Track]:
+        """Each speaker's audio over the buffered window ending now."""
         length = int(round(self.seconds * SAMPLE_RATE))
         with self._lock:
             now = self._clock()
             self._prune(now)
             window_start = now - self.seconds
-            tracks = [(track.key, list(track.chunks)) for track in self._tracks.values()]
+            snapshot = [(track.key, track.name, list(track.chunks)) for track in self._tracks.values()]
 
-        mixed = np.zeros(length, dtype=np.float32)
-        for key, chunks in tracks:
-            track = _render(chunks, window_start, length)
+        rendered = []
+        for key, name, chunks in snapshot:
+            samples = _render(chunks, window_start, length)
             # The soundboard is already at the volume it was played at.
-            auto = speech_gain(track) if normalize and key != SOUNDBOARD_KEY else 1.0
-            mixed += track * auto * max(0.0, gains.get(key, 1.0))
+            auto = speech_gain(samples) if normalize and key != SOUNDBOARD_KEY else 1.0
+            rendered.append(Track(key, name, samples, auto))
+        return rendered
 
-        if np.abs(mixed).max(initial=0.0) > 0.9:
-            # Soft-limit instead of hard clipping when voices overlap.
-            mixed = np.tanh(mixed)
-        return (np.clip(mixed, -1.0, 1.0) * 32767).astype(np.int16)
+    def mix(self, gains: dict[str, float] | None = None, normalize: bool = True) -> np.ndarray:
+        """Mix the buffered window into mono int16 samples ending now."""
+        return mix_tracks(self.tracks(normalize), gains)
 
     def _track(self, key: str, name: str) -> _Track:
         track = self._tracks.get(key)
@@ -176,6 +190,24 @@ class RollingRecorder:
                 del self._tracks[key]
 
 
+def mix_tracks(tracks: list[Track], gains: dict[str, float] | None = None) -> np.ndarray:
+    """Level, apply manual per-speaker gain, and mix down to mono int16."""
+    gains = gains or {}
+    length = max((len(track.samples) for track in tracks), default=0)
+    mixed = np.zeros(length, dtype=np.float32)
+    for track in tracks:
+        gain = track.auto_gain * max(0.0, gains.get(track.key, 1.0))
+        mixed[: len(track.samples)] += track.samples * gain
+    if np.abs(mixed).max(initial=0.0) > 0.9:
+        # Soft-limit instead of hard clipping when voices overlap.
+        mixed = np.tanh(mixed)
+    return to_int16(mixed)
+
+
+def to_int16(samples: np.ndarray) -> np.ndarray:
+    return (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16)
+
+
 def _render(chunks: list[_Chunk], window_start: float, length: int) -> np.ndarray:
     track = np.zeros(length, dtype=np.float32)
     for chunk in chunks:
@@ -201,7 +233,7 @@ def speech_gain(track: np.ndarray) -> float:
     return float(np.clip(_TARGET_RMS / speech_rms, _MIN_AUTO_GAIN, _MAX_AUTO_GAIN))
 
 
-def encode_clip(samples: np.ndarray) -> tuple[bytes, str]:
+def encode_clip(samples: np.ndarray, bitrate: str = "128k") -> tuple[bytes, str]:
     """Encode mono int16 samples as MP3 when FFmpeg is available, otherwise WAV."""
     wav = io.BytesIO()
     with wave.open(wav, "wb") as writer:
@@ -214,9 +246,37 @@ def encode_clip(samples: np.ndarray) -> tuple[bytes, str]:
         return wav.getvalue(), "wav"
     result = subprocess.run(
         [ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0",
-         "-codec:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"],
+         "-codec:a", "libmp3lame", "-b:a", bitrate, "-f", "mp3", "pipe:1"],
         input=wav.getvalue(), capture_output=True, timeout=60, check=False,
     )
     if result.returncode != 0 or not result.stdout:
         return wav.getvalue(), "wav"
     return result.stdout, "mp3"
+
+
+def decode_audio(path: Path) -> np.ndarray:
+    """Read a saved clip or stem as mono float32 samples at SAMPLE_RATE."""
+    if path.suffix.lower() == ".wav":
+        with wave.open(str(path), "rb") as reader:
+            if reader.getsampwidth() != 2:
+                raise ValueError(f"Unsupported WAV sample width in {path.name}")
+            pcm = np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2")
+            if reader.getnchannels() > 1:
+                pcm = pcm.reshape(-1, reader.getnchannels()).mean(axis=1)
+            rate = reader.getframerate()
+        samples = pcm.astype(np.float32) / 32768.0
+        if rate != SAMPLE_RATE:
+            positions = np.arange(0, len(samples), rate / SAMPLE_RATE)
+            samples = np.interp(positions, np.arange(len(samples)), samples).astype(np.float32)
+        return samples
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ValueError("FFmpeg is needed to edit MP3 clips.")
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(path),
+         "-f", "s16le", "-ac", "1", "-ar", str(SAMPLE_RATE), "pipe:1"],
+        capture_output=True, timeout=60, check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"Could not decode {path.name}: {result.stderr.decode(errors='replace')[:200]}")
+    return np.frombuffer(result.stdout, dtype="<i2").astype(np.float32) / 32768.0

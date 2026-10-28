@@ -172,7 +172,7 @@ class RecordingService:
         }
 
     async def save_clip(self, guild_id: int) -> dict[str, object]:
-        from app.recording import encode_clip
+        from app.clip_editor import save_tracks
 
         if not self.is_recording(guild_id):
             raise ValueError("Recording is not switched on for this server.")
@@ -180,12 +180,12 @@ class RecordingService:
         if recorder is None or not recorder.speakers():
             raise ValueError("Nothing has been recorded in the last minute.")
         gains = self.preferences.recording_gains(guild_id)
-        samples = await asyncio.to_thread(recorder.mix, gains)
-        data, extension = await asyncio.to_thread(encode_clip, samples)
+        # Capture the window now; mixing and encoding happen off the event loop.
+        tracks = await asyncio.to_thread(recorder.tracks)
         guild = self.bot.get_guild(guild_id)
         channel = guild.get_channel(self._active[guild_id]) if guild else None
         label = f"{guild.name if guild else guild_id} {channel.name if channel else ''}"
-        return self.clips.save(data, extension, label)
+        return await asyncio.to_thread(save_tracks, self.clips, tracks, gains, label=label)
 
 
 def _make_sink(voice_recv: ModuleType, recorder: RollingRecorder):

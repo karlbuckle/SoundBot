@@ -647,6 +647,11 @@ async function loadClips() {
       play.className = "secondary-button";
       play.textContent = "▶ Play";
       play.addEventListener("click", () => playClip(clip.name));
+      const edit = document.createElement("button");
+      edit.className = "secondary-button";
+      edit.textContent = "✂ Edit";
+      edit.title = clip.editable_levels ? "Trim and adjust each person's level" : "Trim this clip";
+      edit.addEventListener("click", () => openEditor(clip.name));
       const download = document.createElement("button");
       download.className = "secondary-button";
       download.textContent = "Download";
@@ -655,7 +660,7 @@ async function loadClips() {
       remove.className = "secondary-button danger";
       remove.textContent = "Delete";
       remove.addEventListener("click", () => deleteClip(clip.name));
-      actions.append(play, download, remove);
+      actions.append(play, edit, download, remove);
       return [clip.name, new Date(clip.created_at).toLocaleString(), formatBytes(clip.size), actions];
     }), "No clips saved yet.", 4);
     body.querySelectorAll("tr td:first-child").forEach((cell) => { cell.title = cell.textContent; });
@@ -664,7 +669,8 @@ async function loadClips() {
 
 // Clips need the API key header, so fetch them as blobs rather than linking directly.
 async function fetchClip(name) {
-  const response = await fetch(`/api/clips/${encodeURIComponent(name)}`, { headers: { "X-API-Key": apiKey() } });
+  // no-cache: an edited clip can replace the original under the same name.
+  const response = await fetch(`/api/clips/${encodeURIComponent(name)}`, { headers: { "X-API-Key": apiKey() }, cache: "no-cache" });
   if (!response.ok) throw new Error(`Could not load clip (${response.status})`);
   return response.blob();
 }

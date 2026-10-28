@@ -14,8 +14,10 @@ def test_page_files_are_revalidated_but_api_responses_are_not(tmp_path, monkeypa
     main = importlib.import_module("app.main")
 
     with TestClient(main.app) as client:
-        for path in ("/", "/static/app.js", "/static/styles.css"):
+        for path in ("/", "/static/app.js", "/static/styles.css", "/static/editor.js"):
             response = client.get(path)
             assert response.status_code == 200
             assert response.headers["cache-control"] == "no-cache"
+        # Clip audio can change under the same name when an edit replaces it.
+        assert client.get("/api/clips/missing.mp3").headers["cache-control"] == "no-cache"
         assert "cache-control" not in client.get("/api/health").headers
