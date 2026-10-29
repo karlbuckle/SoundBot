@@ -52,6 +52,9 @@ class GuildPreferences:
                 )
                 """
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database, timeout=5)
@@ -124,3 +127,20 @@ class GuildPreferences:
                 (str(guild_id), speaker_key, gain),
             )
         return gain
+
+    def setting(self, key: str, default: str | None = None) -> str | None:
+        """An app-wide setting, such as where clips are added to the sound library."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        with self._connect() as connection:
+            if value is None:
+                connection.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+            else:
+                connection.execute(
+                    "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )

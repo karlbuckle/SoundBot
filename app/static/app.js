@@ -6,6 +6,7 @@ const state = {
   favourites: new Set(),
   recording: null,
   recordingAvailable: false,
+  clipExport: null,
   adjustingVolume: false,
   applyingPlaybackControl: false,
 };
@@ -528,6 +529,7 @@ async function load(refreshLibrary = false) {
     document.querySelector("#connection-title").textContent = health.discord_ready ? "Discord online" : "Discord offline";
     document.querySelector("#connection-copy").textContent = health.discord_ready ? `${guilds.length} server${guilds.length === 1 ? "" : "s"}` : "Check bot token";
     state.recordingAvailable = Boolean(health.recording_available);
+    await loadClipExport();
     await loadRecordingStatus();
     scheduleRecordingPoll();
   } catch (error) {
@@ -652,6 +654,13 @@ async function loadClips() {
       edit.textContent = "✂ Edit";
       edit.title = clip.editable_levels ? "Trim and adjust each person's level" : "Trim this clip";
       edit.addEventListener("click", () => openEditor(clip.name));
+      const addToSounds = document.createElement("button");
+      addToSounds.className = "secondary-button";
+      addToSounds.textContent = "＋ Sounds";
+      addToSounds.title = state.clipExport?.target
+        ? `Copy into ${state.clipExport.target} so it can be played from the soundboard`
+        : "Choose an audio folder for clips on the Settings page first";
+      addToSounds.addEventListener("click", () => addClipToSounds(clip.name));
       const download = document.createElement("button");
       download.className = "secondary-button";
       download.textContent = "Download";
@@ -660,7 +669,7 @@ async function loadClips() {
       remove.className = "secondary-button danger";
       remove.textContent = "Delete";
       remove.addEventListener("click", () => deleteClip(clip.name));
-      actions.append(play, edit, download, remove);
+      actions.append(play, edit, addToSounds, download, remove);
       return [clip.name, new Date(clip.created_at).toLocaleString(), formatBytes(clip.size), actions];
     }), "No clips saved yet.", 4);
     body.querySelectorAll("tr td:first-child").forEach((cell) => { cell.title = cell.textContent; });
@@ -694,6 +703,63 @@ async function downloadClip(name) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   } catch (error) { notify(error.message, true); }
+}
+
+async function addClipToSounds(name) {
+  if (!state.clipExport?.target) {
+    notify("Choose an audio folder for clips on the Settings page first.", true);
+    return;
+  }
+  // Suggest the clip's name without its timestamp prefix and extension.
+  const suggested = name.replace(/\.(mp3|wav)$/i, "").replace(/^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} /, "");
+  const soundName = window.prompt("Name for the new sound:", suggested);
+  if (soundName === null) return;
+  try {
+    const result = await api(`/api/clips/${encodeURIComponent(name)}/export`, {
+      method: "POST",
+      body: JSON.stringify({ sound_name: soundName }),
+    });
+    notify(`Added "${result.sound_name}" to the sound library`);
+    refreshSounds(await api("/api/sounds"));
+  } catch (error) { notify(error.message, true); }
+}
+
+function renderClipExport() {
+  const status = state.clipExport;
+  const select = document.querySelector("#export-root");
+  const text = document.querySelector("#export-status");
+  select.replaceChildren();
+  if (!status) {
+    text.textContent = "Couldn't load the clip folder setting.";
+    return;
+  }
+  status.roots.forEach((root) => {
+    const label = `${root.path}${root.writable ? "" : " (read-only)"}`;
+    select.add(new Option(label, root.path));
+  });
+  select.value = status.root || status.roots.find((root) => root.writable)?.path || status.roots[0]?.path || "";
+  document.querySelector("#export-subfolder").value = status.subfolder;
+  text.className = "defaults-server";
+  if (!status.roots.length) {
+    text.textContent = "No audio folders are configured (AUDIO_DIRECTORIES).";
+  } else if (!status.target) {
+    text.textContent = "Not set yet, so ＋ Sounds is off.";
+  } else if (status.writable) {
+    text.classList.add("export-ok");
+    text.textContent = `✓ Clips are added to ${status.target}`;
+  } else {
+    text.classList.add("export-warn");
+    text.textContent = `⚠ ${status.target} is read-only. Mount that folder without :ro in your compose file.`;
+  }
+}
+
+async function loadClipExport() {
+  try {
+    state.clipExport = await api("/api/settings/clip-export");
+  } catch (_error) {
+    state.clipExport = null;
+  }
+  renderClipExport();
 }
 
 async function deleteClip(name) {
@@ -739,6 +805,7 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   history.replaceState(null, "", `#${button.dataset.page}`);
   if (button.dataset.page === "components") loadComponents();
   if (button.dataset.page === "stats") loadStats();
+  if (button.dataset.page === "settings") loadClipExport();
   if (button.dataset.page === "clips") {
     loadClips();
     loadRecordingStatus();
@@ -779,6 +846,20 @@ document.addEventListener("visibilitychange", () => {
 });
 elements.defaultsVolume.addEventListener("input", () => {
   elements.defaultsVolumeLabel.textContent = `Volume ${Math.round(Number(elements.defaultsVolume.value) * 100)}%`;
+});
+document.querySelector("#save-export").addEventListener("click", async () => {
+  try {
+    state.clipExport = await api("/api/settings/clip-export", {
+      method: "POST",
+      body: JSON.stringify({
+        root: document.querySelector("#export-root").value || null,
+        subfolder: document.querySelector("#export-subfolder").value,
+      }),
+    });
+    renderClipExport();
+    notify(state.clipExport.writable ? "Clip folder saved" : "Clip folder saved, but it's read-only", !state.clipExport.writable);
+    loadClips();
+  } catch (error) { notify(error.message, true); }
 });
 elements.saveDefaults.addEventListener("click", async () => {
   const guild = state.guilds.find((item) => item.id === elements.guild.value);

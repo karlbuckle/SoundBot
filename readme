@@ -129,6 +129,12 @@ then save it as a new clip or replace the original. Clips keep one track per
 speaker (in a `.stems` folder next to the clip) so levels can be changed after
 saving; clips saved before this existed can be trimmed only.
 
+To make a clip playable from the soundboard, click **＋ Sounds** on it and give
+it a name. Choose where these go on the **Settings** page: one of your audio
+folders plus a subfolder (default `clips`). That folder must be writable, so
+mount it without `:ro` in your compose file, for example
+`- ./sounds:/media/sounds` instead of `- ./sounds:/media/sounds:ro`.
+
 Make sure everyone in the channel knows they may be recorded. To go back to
 stock discord.py, set `ENABLE_RECORDING=false` and rerun `bash deploy.sh`.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from datetime import UTC, datetime
@@ -12,6 +13,30 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,150}$")
 _SAFE_STEM_FILE = re.compile(r"^[A-Za-z0-9_-]{1,60}\.(mp3|wav)$")
 _EDIT_SUFFIX = re.compile(r" \(edit(?: \d+)?\)$")
 _MANIFEST = "manifest.json"
+_TIMESTAMP_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} ")
+_SUBFOLDER_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,60}$")
+_UNSAFE_FILENAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def clean_subfolder(value: str) -> str:
+    """Validate a library subfolder like "clips" or "clips/funny" (no "..", max 3 levels)."""
+    parts = [part.strip() for part in value.replace("\\", "/").split("/") if part.strip()]
+    if len(parts) > 3 or not all(_SUBFOLDER_PART.match(part) for part in parts):
+        raise ValueError("Use up to three folder names of letters, numbers, spaces, - or _, separated by /.")
+    return "/".join(parts)
+
+
+def clean_sound_name(value: str) -> str:
+    """A filesystem-safe sound name; the library uses the file name as the sound's name."""
+    return re.sub(r"\s+", " ", _UNSAFE_FILENAME.sub(" ", value)).strip(" .")[:80]
+
+
+def is_writable(directory: Path) -> bool:
+    """Whether files can be created in a folder (or the nearest existing parent it would be made in)."""
+    probe = directory
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    return probe.is_dir() and os.access(probe, os.W_OK)
 
 # A clip's per-speaker tracks: the manifest, and file name -> encoded audio.
 Stems = tuple[dict, dict[str, bytes]]
@@ -79,6 +104,26 @@ class ClipStore:
             return None
         stem = self._stems_dir(path) / file
         return stem if stem.is_file() else None
+
+    def export(self, name: str, directory: Path, sound_name: str = "") -> Path:
+        """Copy a clip into a sound library folder, never overwriting an existing sound."""
+        source = self.path(name)
+        if source is None:
+            raise FileNotFoundError(name)
+        stem = (
+            clean_sound_name(sound_name)
+            or clean_sound_name(_TIMESTAMP_PREFIX.sub("", source.stem))
+            or "clip"
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        extension = source.suffix.lower()
+        target, counter = directory / f"{stem}{extension}", 2
+        while target.exists():
+            target = directory / f"{stem} ({counter}){extension}"
+            counter += 1
+        # copyfile (not copy2) so the sound counts as newly added when sorting.
+        shutil.copyfile(source, target)
+        return target
 
     def delete(self, name: str) -> bool:
         path = self.path(name)

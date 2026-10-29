@@ -167,6 +167,11 @@ code { color: #d8c2ff; background: #a97cf812; padding: 2px 5px; border-radius: 5
 .defaults-volume input[type="range"] { width: 100%; accent-color: var(--accent); }
 .defaults-controls :disabled { opacity: .5; cursor: not-allowed; }
 .settings-note { color: var(--muted); font-size: 13px; margin-top: 18px; }
+.export-card { margin-top: 14px; }
+.field-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+.field-label select, .field-label input { max-width: none; width: 100%; padding: 10px 12px; }
+.export-ok { color: var(--green); }
+.export-warn { color: #e0ad50; }
 .record-save-button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #b8495688; background: #f17f8c18; color: #ffd9de; border-radius: 9px; padding: 10px 13px; font-weight: 700; white-space: nowrap; }
 .record-save-button:hover { background: #f17f8c2c; }
 .record-save-button[hidden] { display: none; }
