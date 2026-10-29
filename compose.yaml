@@ -15,6 +15,7 @@ services:
     ports:
       - "${SOUNDBOARD_PORT:-8000}:8000"
     volumes:
+      # Remove :ro to let "＋ Sounds" on the Clips page save clips into this folder.
       - ./sounds:/media/sounds:ro
       - soundboard-data:/data
       # Add more host folders here, then include their container paths in

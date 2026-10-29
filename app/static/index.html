@@ -241,6 +241,22 @@
               <button class="primary-button" id="save-defaults">Save defaults</button>
             </div>
           </div>
+          <div class="defaults-card export-card">
+            <div class="defaults-intro">
+              <strong>Clips added to sounds</strong>
+              <small>Where <b>＋ Sounds</b> on the Clips page copies a clip so it can be played from the soundboard. Choose one of your audio folders and a subfolder inside it.</small>
+              <span class="defaults-server" id="export-status">Loading…</span>
+            </div>
+            <div class="defaults-controls">
+              <label class="field-label" for="export-root">Audio folder
+                <select id="export-root"></select>
+              </label>
+              <label class="field-label" for="export-subfolder">Subfolder
+                <input id="export-subfolder" maxlength="200" placeholder="clips" autocomplete="off">
+              </label>
+              <button class="primary-button" id="save-export">Save folder</button>
+            </div>
+          </div>
           <p class="settings-note">Your own volume, normalize, sort, grouping and favourites are saved in this browser automatically.</p>
         </section>
 

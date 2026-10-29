@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.bot import SoundboardBot
-from app.clips import ClipStore
+from app.clips import ClipStore, clean_subfolder, is_writable
 from app.config import Settings
 from app.library import AudioLibrary
 from app.preferences import MAX_SPEAKER_GAIN, MAX_VOLUME, GuildPreferences
@@ -118,6 +118,15 @@ class SpeakerGainRequest(BaseModel):
     guild_id: int
     speaker_key: str = Field(min_length=1, max_length=40)
     gain: float = Field(ge=0.0, le=MAX_SPEAKER_GAIN)
+
+
+class ClipExportSettingsRequest(BaseModel):
+    root: str | None = Field(default=None, max_length=500)  # None turns exporting off
+    subfolder: str = Field(default="clips", max_length=200)
+
+
+class ClipExportRequest(BaseModel):
+    sound_name: str = Field(default="", max_length=120)
 
 
 class ClipEditRequest(BaseModel):
@@ -413,6 +422,72 @@ async def edit_clip(name: str, request: ClipEditRequest) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def clip_export_target() -> Path | None:
+    """Where "Add to sounds" copies clips: a subfolder of one of the library folders."""
+    root = preferences.setting("clip_export_root")
+    roots = {str(path): path for path in settings.audio_directories}
+    if root not in roots:
+        return None  # not set, or that folder was removed from AUDIO_DIRECTORIES
+    subfolder = preferences.setting("clip_export_subfolder", "")
+    return roots[root] / subfolder if subfolder else roots[root]
+
+
+def clip_export_status() -> dict[str, object]:
+    target = clip_export_target()
+    return {
+        "roots": [
+            {"path": str(path), "exists": path.is_dir(), "writable": is_writable(path)}
+            for path in settings.audio_directories
+        ],
+        "root": preferences.setting("clip_export_root") if target else None,
+        "subfolder": preferences.setting("clip_export_subfolder", "clips"),
+        "target": str(target) if target else None,
+        "writable": bool(target and is_writable(target)),
+    }
+
+
+@app.get("/api/settings/clip-export", dependencies=[Depends(require_api_token)])
+async def get_clip_export_settings() -> dict[str, object]:
+    return clip_export_status()
+
+
+@app.post("/api/settings/clip-export", dependencies=[Depends(require_api_token)])
+async def set_clip_export_settings(request: ClipExportSettingsRequest) -> dict[str, object]:
+    if request.root is None:
+        preferences.set_setting("clip_export_root", None)
+        return clip_export_status()
+    if request.root not in {str(path) for path in settings.audio_directories}:
+        raise HTTPException(status_code=400, detail="Choose one of the configured audio folders.")
+    try:
+        subfolder = clean_subfolder(request.subfolder)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    preferences.set_setting("clip_export_root", request.root)
+    preferences.set_setting("clip_export_subfolder", subfolder)
+    return clip_export_status()
+
+
+@app.post("/api/clips/{name}/export", dependencies=[Depends(require_api_token)])
+async def export_clip(name: str, request: ClipExportRequest) -> dict[str, object]:
+    target = clip_export_target()
+    if target is None:
+        raise HTTPException(status_code=400, detail="Choose an audio folder for clips on the Settings page first.")
+    if clips.path(name) is None:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    if not is_writable(target):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{target} is read-only. Mount that folder without :ro in your compose file.",
+        )
+    try:
+        path = await asyncio.to_thread(clips.export, name, target, request.sound_name)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not copy the clip: {exc.strerror or exc}") from exc
+    # Rescan so the new sound is playable straight away.
+    await asyncio.to_thread(library.all, True)
+    return {"sound_name": path.stem, "path": str(path)}
 
 
 @app.delete("/api/clips/{name}", dependencies=[Depends(require_api_token)])
